@@ -5,5 +5,20 @@
 }
 
 body {
-  @apply bg-neutral-900 text-neutral-50 antialiased;
+  background-image: radial-gradient(ellipse at top, var(--tw-gradient-stops));
+  @apply from-neutral-800 via-neutral-950 to-black text-neutral-50 antialiased min-h-screen selection:bg-green-500/30;
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-white/5 backdrop-blur-md border border-white/10 shadow-xl;
+  }
+
+  .glass-dock {
+    @apply bg-black/40 backdrop-blur-xl border border-white/5 shadow-2xl;
+  }
+
+  .text-glow {
+    filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.3));
+  }
 }

@@ -44,14 +44,18 @@ export const Timeline: React.FC<TimelineProps> = ({ player, onGapClick, isIntera
             {player.timeline.map((card, index) => (
                 <React.Fragment key={card.id}>
                     {/* The Card */}
-                    <div className="relative w-56 h-96 shrink-0 bg-neutral-800 rounded-xl overflow-hidden shadow-lg border-2 border-transparent hover:border-neutral-600 transition-all flex flex-col group snap-center">
-                        <img src={card.image} alt={card.title} className="w-full h-56 object-cover" />
-                        <div className="p-3 flex-1 bg-neutral-900 flex flex-col items-center justify-center gap-2 w-full">
-                            <span className="text-4xl font-bold text-white leading-none">{card.year}</span>
+                    {/* The Card */}
+                    <div className="relative w-56 h-96 shrink-0 bg-white/5 backdrop-blur-md rounded-2xl overflow-hidden shadow-xl border border-white/10 hover:border-green-500/30 hover:-translate-y-2 hover:shadow-2xl transition-all duration-300 flex flex-col group snap-center">
+                        <div className="relative w-full h-56 overflow-hidden">
+                            <img src={card.image} alt={card.title} className="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-700" />
+                            <div className="absolute inset-0 bg-linear-to-t from-black/80 to-transparent opacity-60"></div>
+                        </div>
+                        <div className="p-4 flex-1 bg-white/5 backdrop-blur-sm flex flex-col items-center justify-center gap-2 w-full border-t border-white/5 relative">
+                            <span className="text-5xl font-black text-white/90 tracking-tighter drop-shadow-xl">{card.year}</span>
                             <div className="flex flex-col items-center w-full px-1 gap-1">
-                                <span className="text-base font-bold text-green-400 text-center leading-tight line-clamp-2 w-full">{card.title}</span>
-                                <span className="text-sm text-neutral-300 text-center leading-tight line-clamp-1 w-full">{card.artist}</span>
-                                <span className="text-xs text-neutral-500 text-center leading-tight line-clamp-1 w-full italic">{card.album}</span>
+                                <span className="text-sm font-bold text-green-400 text-center leading-tight line-clamp-2 w-full drop-shadow-sm">{card.title}</span>
+                                <span className="text-xs text-neutral-300 text-center leading-tight line-clamp-1 w-full font-medium">{card.artist}</span>
+                                <span className="text-[10px] text-neutral-500 text-center leading-tight line-clamp-1 w-full italic">{card.album}</span>
                             </div>
                         </div>
                     </div>
