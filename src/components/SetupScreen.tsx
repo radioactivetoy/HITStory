@@ -4,6 +4,7 @@ import { fetchPlaylist } from '../lib/spotify';
 import { type Difficulty } from '../types';
 import { Plus, Play } from 'lucide-react';
 import GameLogo from '../assets/HITStory_Logo.png';
+import { PRESET_PLAYLISTS } from '../data/playlists';
 
 export const SetupScreen: React.FC = () => {
     const { state, dispatch, login, logout, token } = useGame();
@@ -14,6 +15,19 @@ export const SetupScreen: React.FC = () => {
     const [color, setColor] = useState('#10B981');
     const [targetScore, setTargetScore] = useState(10);
     const AVAILABLE_COLORS = ['#10B981', '#F59E0B', '#3B82F6', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'];
+
+    const [selectedPlaylistOption, setSelectedPlaylistOption] = useState(PRESET_PLAYLISTS[0].id);
+
+    // Sync manual ID when preset changes
+    const handlePlaylistChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const val = e.target.value;
+        setSelectedPlaylistOption(val);
+        if (val !== 'CUSTOM') {
+            setPlaylistId(val);
+        } else {
+            setPlaylistId('');
+        }
+    };
 
     const handleAddPlayer = () => {
         if (!name.trim() || state.players.length >= 8) return;
@@ -117,10 +131,10 @@ export const SetupScreen: React.FC = () => {
                                         onClick={() => !isTaken && setColor(c)}
                                         disabled={isTaken}
                                         className={`w-6 h-6 rounded-full border-2 transition-transform ${color === c
-                                                ? 'border-white scale-110 ring-2 ring-white/20'
-                                                : isTaken
-                                                    ? 'opacity-20 cursor-not-allowed border-neutral-800 filter grayscale'
-                                                    : 'border-transparent opacity-50 hover:opacity-100 hover:scale-110'
+                                            ? 'border-white scale-110 ring-2 ring-white/20'
+                                            : isTaken
+                                                ? 'opacity-20 cursor-not-allowed border-neutral-800 filter grayscale'
+                                                : 'border-transparent opacity-50 hover:opacity-100 hover:scale-110'
                                             }`}
                                         style={{ backgroundColor: c }}
                                     />
@@ -187,13 +201,27 @@ export const SetupScreen: React.FC = () => {
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-xs text-neutral-400 uppercase font-bold tracking-wider">Playlist ID</label>
-                            <input
-                                type="text"
-                                value={playlistId}
-                                onChange={(e) => setPlaylistId(e.target.value)}
-                                className="w-full bg-neutral-700 text-neutral-300 px-3 py-2 rounded text-sm font-mono focus:ring-1 focus:ring-green-500 outline-none"
-                            />
+                            <label className="text-xs text-neutral-400 uppercase font-bold tracking-wider">Playlist</label>
+
+                            <select
+                                value={selectedPlaylistOption}
+                                onChange={handlePlaylistChange}
+                                className="w-full bg-neutral-700 text-neutral-300 px-3 py-2 rounded text-sm mb-2 outline-none focus:ring-1 focus:ring-green-500"
+                            >
+                                {PRESET_PLAYLISTS.map(p => (
+                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                ))}
+                            </select>
+
+                            {selectedPlaylistOption === 'CUSTOM' && (
+                                <input
+                                    type="text"
+                                    placeholder="Enter Spotify Playlist ID"
+                                    value={playlistId}
+                                    onChange={(e) => setPlaylistId(e.target.value)}
+                                    className="w-full bg-neutral-800 text-white px-3 py-2 rounded text-sm font-mono focus:ring-1 focus:ring-green-500 outline-none border border-neutral-600 animate-fade-in"
+                                />
+                            )}
                         </div>
                     </div>
 
