@@ -11,10 +11,10 @@ export const PRESET_PLAYLISTS: PlaylistOption[] = [
     { name: 'Billboard #1s (1958-2024)', id: '4cvaiNZl0jvfnT5BV0GYwL' },
 
     // --- Genres ---
-    { name: 'Greatest Hits of All Time (Rock/Pop)', id: '37i9dQZF1DWTJHzhaHbF8Q' },
+    { name: 'Rock Classics (Greatest Hits)', id: '37i9dQZF1DWXRqgorJj26U' },
     { name: 'History of Rock (Legendary)', id: '6RU5ydGPBQ8fJKWAqMj8Hg' },
     { name: 'Prog Rock Classics', id: '3hi9376Zb1CaNnJyTlgcG1' },
-    { name: 'Metal Essentials', id: '37i9dQZF1DWXRqgorJj26U' },
+    { name: 'Metal Essentials', id: '37i9dQZF1DWWOaP4H0wKNS' },
     { name: 'Blues Classics', id: '37i9dQZF1DXd9rSDyQguIk' },
     { name: 'History of Electronic Music', id: '4LV2GT0PWUkbPV3m8kBtIi' },
 

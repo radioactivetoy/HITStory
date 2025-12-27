@@ -376,83 +376,93 @@ export const GameScreen: React.FC = () => {
                 {/* Leaderboard Logic - Display ALWAYS if Game Over */}
                 {
                     state.currentPhase === 'GAME_OVER' && (
-                        <div className="w-full max-w-md bg-neutral-800 rounded-xl p-6 border border-neutral-700 animate-fade-in mb-8">
-                            <h3 className="text-2xl font-bold text-center mb-4 text-white">Current Standings</h3>
-                            <ul className="space-y-2">
-                                {/* Sort by Rank (if won) then by Cards */}
-                                {[...state.players]
-                                    .sort((a, b) => (a.rank || 999) - (b.rank || 999) || b.timeline.length - a.timeline.length)
-                                    .map((p, i) => (
-                                        <li key={p.id} className={`flex justify-between items-center p-3 rounded-lg ${p.rank === 1 ? 'bg-yellow-500/20 border border-yellow-500' : 'bg-neutral-700'}`}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="flex flex-col items-center w-8">
-                                                    {p.rank ? (
-                                                        <span className="font-bold text-2xl">{p.rank}</span>
-                                                    ) : (
-                                                        <span className="text-neutral-500 text-sm">#{state.players.filter(pl => pl.hasWon).length + 1 + [...state.players].filter(pl => !pl.hasWon && pl.timeline.length > p.timeline.length).length}</span>
-                                                    )}
-                                                    {p.rank === 1 && <span className="text-[10px]">👑</span>}
-                                                </div>
-                                                <span className="font-bold" style={{ color: p.color }}>{p.name}</span>
-                                            </div>
-                                            <div className="flex flex-col items-end">
-                                                <span className="text-xs text-neutral-400">Cards</span>
-                                                <span className="font-bold" style={{ color: p.hasWon ? p.color : 'inherit' }}>{p.timeline.length}</span>
-                                            </div>
-                                        </li>
-                                    ))}
-                            </ul>
-                            {!state.winner && (
-                                <button
-                                    onClick={() => window.location.reload()}
-                                    className="mt-6 w-full bg-green-500 hover:bg-green-400 text-black px-6 py-3 rounded-full font-bold shadow-lg"
-                                >
-                                    Start New Game
-                                </button>
+                        <div className="flex flex-row items-start justify-center gap-4 w-full max-w-4xl animate-fade-in relative z-50 mt-10">
+                            {/* Left Side: Winner Card (if any) */}
+                            {state.winner && (
+                                <div className="flex flex-col items-center gap-4 bg-neutral-800/90 p-6 rounded-2xl border-2 border-yellow-500 shadow-2xl backdrop-blur-md flex-1 min-w-[300px]">
+                                    <div className="text-5xl mb-2 animate-bounce">
+                                        {state.players.filter(p => p.hasWon).length === 0 ? '🏆' : '🥈'}
+                                    </div>
+                                    <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-orange-400 to-yellow-500 animate-pulse text-center leading-tight">
+                                        {state.winner.name}
+                                        <span className="block text-2xl mt-1 text-white font-bold">
+                                            {state.players.filter(p => p.hasWon).length === 0
+                                                ? 'Wins!'
+                                                : `Takes ${(state.players.filter(p => p.hasWon).length + 1) === 2 ? '2nd' : (state.players.filter(p => p.hasWon).length + 1) === 3 ? '3rd' : (state.players.filter(p => p.hasWon).length + 1) + 'th'} Place`}
+                                        </span>
+                                    </h2>
+                                    <div className="text-sm text-neutral-300 font-medium bg-black/20 px-4 py-1 rounded-full">
+                                        Reached {state.settings.targetScore} cards!
+                                    </div>
+
+                                    <div className="flex flex-col gap-3 mt-4 w-full">
+                                        {state.players.filter(p => !p.hasWon && p.id !== state.winner?.id).length > 1 ? (
+                                            <>
+                                                <button
+                                                    onClick={() => dispatch({ type: 'CONTINUE_GAME' })}
+                                                    className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-full font-bold text-base shadow-lg transition-transform hover:scale-105 flex items-center justify-center gap-2 w-full"
+                                                >
+                                                    Continue Playing <span className="text-xs opacity-75 font-normal">(for {(state.players.filter(p => p.hasWon).length + 2) === 2 ? '2nd' : (state.players.filter(p => p.hasWon).length + 2) === 3 ? '3rd' : (state.players.filter(p => p.hasWon).length + 2) + 'th'} place)</span>
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        localStorage.removeItem('hitstory_game_state');
+                                                        window.location.reload();
+                                                    }}
+                                                    className="bg-neutral-700 hover:bg-neutral-600 text-white px-6 py-2 rounded-full font-bold text-base shadow-xl transition-transform hover:scale-105 w-full border border-white/10"
+                                                >
+                                                    Start New Game
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button
+                                                onClick={() => {
+                                                    localStorage.removeItem('hitstory_game_state');
+                                                    window.location.reload();
+                                                }}
+                                                className="bg-green-500 hover:bg-green-400 text-black px-6 py-2 rounded-full font-bold text-base shadow-xl transition-transform hover:scale-105 w-full transform hover:-translate-y-1"
+                                            >
+                                                Start New Game
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
                             )}
-                        </div>
-                    )
-                }
 
-                {
-                    state.currentPhase === 'GAME_OVER' && state.winner && (
-                        <div className="flex flex-col items-center gap-6 animate-fade-in bg-neutral-800/80 p-8 rounded-2xl border-2 border-yellow-500 shadow-2xl backdrop-blur-sm z-50">
-                            <div className="text-6xl mb-4">
-                                {state.players.filter(p => p.hasWon).length === 0 ? '🏆' : '🥈'}
-                            </div>
-                            <h2 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500 animate-pulse text-center">
-                                {state.winner.name}
-                                {state.players.filter(p => p.hasWon).length === 0
-                                    ? ' Wins!'
-                                    : ` takes ${(state.players.filter(p => p.hasWon).length + 1) === 2 ? '2nd' : (state.players.filter(p => p.hasWon).length + 1) === 3 ? '3rd' : (state.players.filter(p => p.hasWon).length + 1) + 'th'} Place!`}
-                            </h2>
-                            <div className="text-2xl text-neutral-300">
-                                Reached {state.settings.targetScore} cards!
-                            </div>
-
-                            <div className="flex gap-4 mt-4">
-                                {/* Require at least 2 remaining players (losers) to continue. If only 1 loser left, game ends. */}
-                                {state.players.filter(p => !p.hasWon && p.id !== state.winner?.id).length > 1 ? (
-                                    <>
-                                        <button
-                                            onClick={() => dispatch({ type: 'CONTINUE_GAME' })}
-                                            className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-full font-bold text-lg shadow-lg transition-transform hover:scale-105 flex items-center gap-2"
-                                        >
-                                            Continue Playing <span className="text-xs opacity-75">(for {(state.players.filter(p => p.hasWon).length + 2) === 2 ? '2nd' : (state.players.filter(p => p.hasWon).length + 2) === 3 ? '3rd' : (state.players.filter(p => p.hasWon).length + 2) + 'th'} place)</span>
-                                        </button>
-                                        <button
-                                            onClick={() => window.location.reload()}
-                                            className="bg-neutral-600 hover:bg-neutral-500 text-white px-8 py-3 rounded-full font-bold text-lg shadow-xl transition-transform hover:scale-105"
-                                        >
-                                            New Game
-                                        </button>
-                                    </>
-                                ) : (
+                            {/* Right Side: Standings */}
+                            <div className="bg-neutral-800/80 rounded-2xl p-5 border border-neutral-700 w-full max-w-sm shrink-0 backdrop-blur-sm self-stretch flex flex-col">
+                                <h3 className="text-lg font-bold text-center mb-4 text-white bg-white/5 py-1 rounded-lg border border-white/5">Current Standings</h3>
+                                <ul className="space-y-2 flex-grow overflow-y-auto max-h-[300px] pr-2 scrollbar-thin scrollbar-thumb-neutral-600">
+                                    {[...state.players]
+                                        .sort((a, b) => (a.rank || 999) - (b.rank || 999) || b.timeline.length - a.timeline.length)
+                                        .map((p, i) => (
+                                            <li key={p.id} className={`flex justify-between items-center p-3 rounded-lg border transition-all ${p.rank === 1 ? 'bg-yellow-500/20 border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.2)]' : 'bg-neutral-900/50 border-white/5 hover:bg-neutral-700 hover:border-white/20'}`}>
+                                                <div className="flex items-center gap-3">
+                                                    <div className="flex flex-col items-center w-6 justify-center">
+                                                        {p.rank ? (
+                                                            <span className={`font-black text-lg ${p.rank === 1 ? 'text-yellow-500' : p.rank === 2 ? 'text-gray-300' : p.rank === 3 ? 'text-amber-700' : 'text-neutral-500'}`}>#{p.rank}</span>
+                                                        ) : (
+                                                            <span className="text-neutral-500 text-xs font-bold">#{state.players.filter(pl => pl.hasWon).length + 1 + [...state.players].filter(pl => !pl.hasWon && pl.timeline.length > p.timeline.length).length}</span>
+                                                        )}
+                                                    </div>
+                                                    <span className="font-bold text-base" style={{ color: p.color }}>{p.name}</span>
+                                                </div>
+                                                <div className="flex flex-col items-end bg-black/30 px-2 py-1 rounded-md border border-white/5">
+                                                    <span className="text-[8px] text-neutral-400 uppercase tracking-widest font-bold">Cards</span>
+                                                    <span className="font-black text-lg leading-none" style={{ color: p.hasWon ? p.color : 'inherit' }}>{p.timeline.length}</span>
+                                                </div>
+                                            </li>
+                                        ))}
+                                </ul>
+                                {!state.winner && (
                                     <button
-                                        onClick={() => window.location.reload()}
-                                        className="bg-green-500 hover:bg-green-400 text-black px-8 py-3 rounded-full font-bold text-lg shadow-xl transition-transform hover:scale-105"
+                                        onClick={() => {
+                                            localStorage.removeItem('hitstory_game_state');
+                                            window.location.reload();
+                                        }}
+                                        className="mt-4 w-full bg-green-500 hover:bg-green-400 text-black px-6 py-3 rounded-full font-bold shadow-lg transform active:scale-95 transition-transform text-sm"
                                     >
-                                        Start New Game
+                                        End Game & Restart
                                     </button>
                                 )}
                             </div>
