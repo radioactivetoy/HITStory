@@ -273,10 +273,18 @@ export const GameScreen: React.FC = () => {
                         <div className="flex flex-col justify-center">
                             <span className="text-[10px] text-neutral-400 font-bold tracking-widest uppercase leading-none mb-1">Playing From</span>
                             <div className="flex items-center gap-2">
-                                <ListMusic size={14} className="text-green-400" />
-                                <span className="text-sm font-bold text-white tracking-wide truncate max-w-[200px] leading-none">
-                                    {state.settings.playlistName || 'Unknown Playlist'}
-                                </span>
+                                <ListMusic size={14} className="text-green-400 shrink-0 mr-1" />
+                                <div className="w-[180px] overflow-hidden relative">
+                                    <div className="flex animate-marquee hover:pause gap-4">
+                                        <span className="text-sm font-bold text-white tracking-wide whitespace-nowrap">
+                                            {state.settings.playlistName || 'Unknown Playlist'}
+                                        </span>
+                                        {/* Duplicate for seamless loop */}
+                                        <span className="text-sm font-bold text-white tracking-wide whitespace-nowrap">
+                                            {state.settings.playlistName || 'Unknown Playlist'}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

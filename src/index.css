@@ -49,3 +49,24 @@ body {
 .scrollbar-thick-custom::-webkit-scrollbar-thumb:hover {
   background-color: #22c55e !important;
 }
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: flex;
+  white-space: nowrap;
+  animation: marquee 15s linear infinite;
+  min-width: 100%;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
