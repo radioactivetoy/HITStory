@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { useGame } from '../context/GameContext';
 import { fetchPlaylist } from '../lib/spotify';
 import { type Difficulty } from '../types';
-import { Plus, Play, User } from 'lucide-react';
+import { Plus, Play } from 'lucide-react';
 import GameLogo from '../assets/HITStory_Logo.png';
+import { PRESET_PLAYLISTS } from '../data/playlists';
 
 export const SetupScreen: React.FC = () => {
     const { state, dispatch, login, logout, token } = useGame();
@@ -15,13 +16,39 @@ export const SetupScreen: React.FC = () => {
     const [targetScore, setTargetScore] = useState(10);
     const AVAILABLE_COLORS = ['#10B981', '#F59E0B', '#3B82F6', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'];
 
+    const [selectedPlaylistOption, setSelectedPlaylistOption] = useState(PRESET_PLAYLISTS[0].id);
+
+    // Sync manual ID when preset changes
+    const handlePlaylistChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const val = e.target.value;
+        setSelectedPlaylistOption(val);
+        if (val !== 'CUSTOM') {
+            setPlaylistId(val);
+        } else {
+            setPlaylistId('');
+        }
+    };
+
     const handleAddPlayer = () => {
-        if (!name.trim()) return;
-        dispatch({ type: 'ADD_PLAYER', payload: { name, difficulty, color } });
+        if (!name.trim() || state.players.length >= 8) return;
+
+        // Ensure we don't duplicate color if user didn't change it or state is stale
+        const usedColors = new Set(state.players.map(p => p.color));
+        let colorToAdd = color;
+
+        if (usedColors.has(color)) {
+            const firstFree = AVAILABLE_COLORS.find(c => !usedColors.has(c));
+            if (!firstFree) return; // Should not happen with 8 limit
+            colorToAdd = firstFree;
+        }
+
+        dispatch({ type: 'ADD_PLAYER', payload: { name, difficulty, color: colorToAdd } });
         setName('');
-        // Rotate color for next player
-        const nextColorIdx = (AVAILABLE_COLORS.indexOf(color) + 1) % AVAILABLE_COLORS.length;
-        setColor(AVAILABLE_COLORS[nextColorIdx]);
+
+        // Auto-select next free color for convenience
+        usedColors.add(colorToAdd);
+        const nextFree = AVAILABLE_COLORS.find(c => !usedColors.has(c));
+        if (nextFree) setColor(nextFree);
     };
 
     const handleStartGame = async () => {
@@ -40,18 +67,6 @@ export const SetupScreen: React.FC = () => {
         dispatch({ type: 'START_GAME', payload: { playlistId, targetScore, playlistName: finalName } });
     };
 
-    // Actually, let's just do it inside a proper async function content reuse 
-    // Wait, I need to Import fetchPlaylist at the top of the file first.
-    // I can't easily add import via replace_file_content efficiently without reading whole file or being careful.
-    // Let's replace the whole handleStartGame with a version that calls fetchPlaylist if I assume it's imported or I add the import separately.
-    // I will add import in a separate step or assume I can do it here if I see imports.
-    // I saw imports at line 1-4.
-
-    // Let's verify imports first.
-
-
-    // ... (Login Check remains same)
-
     if (!token) {
         return (
             <div className="flex h-screen items-center justify-center flex-col gap-4">
@@ -69,7 +84,7 @@ export const SetupScreen: React.FC = () => {
         <div className="min-h-screen bg-neutral-900 flex items-center justify-center p-4">
             <div className="bg-neutral-800 p-8 rounded-2xl shadow-2xl w-full max-w-lg border border-neutral-700 relative">
                 <div className="flex justify-between items-center mb-6">
-                    <img src={GameLogo} alt="HITStory" className="h-16 w-auto" />
+                    <img src={GameLogo} alt="HITStory" className="h-24 w-auto object-contain drop-shadow-lg transform hover:scale-105 transition-transform" />
                     <button
                         onClick={() => {
                             if (window.confirm("Are you sure you want to logout?")) {
@@ -108,21 +123,31 @@ export const SetupScreen: React.FC = () => {
                         {/* Color Picker */}
                         <div className="flex gap-2 items-center overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-neutral-700">
                             <span className="text-xs text-neutral-400 font-bold mr-2">Color:</span>
-                            {AVAILABLE_COLORS.map(c => (
-                                <button
-                                    key={c}
-                                    onClick={() => setColor(c)}
-                                    className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${color === c ? 'border-white scale-110 ring-2 ring-white/20' : 'border-transparent opacity-50 hover:opacity-100'}`}
-                                    style={{ backgroundColor: c }}
-                                />
-                            ))}
+                            {AVAILABLE_COLORS.map(c => {
+                                const isTaken = state.players.some(p => p.color === c);
+                                return (
+                                    <button
+                                        key={c}
+                                        onClick={() => !isTaken && setColor(c)}
+                                        disabled={isTaken}
+                                        className={`w-6 h-6 rounded-full border-2 transition-transform ${color === c
+                                            ? 'border-white scale-110 ring-2 ring-white/20'
+                                            : isTaken
+                                                ? 'opacity-20 cursor-not-allowed border-neutral-800 filter grayscale'
+                                                : 'border-transparent opacity-50 hover:opacity-100 hover:scale-110'
+                                            }`}
+                                        style={{ backgroundColor: c }}
+                                    />
+                                );
+                            })}
                         </div>
 
                         <button
                             onClick={handleAddPlayer}
-                            className="w-full bg-green-500 hover:bg-green-600 text-black p-2 rounded-lg transition-colors font-bold flex items-center justify-center gap-2"
+                            disabled={state.players.length >= 8}
+                            className={`w-full p-2 rounded-lg transition-colors font-bold flex items-center justify-center gap-2 ${state.players.length >= 8 ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 text-black'}`}
                         >
-                            <Plus size={20} /> Add Player
+                            <Plus size={20} /> {state.players.length >= 8 ? 'Max Players Reached (8)' : 'Add Player'}
                         </button>
                     </div>
 
@@ -133,17 +158,26 @@ export const SetupScreen: React.FC = () => {
                         ) : (
                             <ul className="space-y-2">
                                 {state.players.map(p => (
-                                    <li key={p.id} className="flex justify-between items-center bg-neutral-800 p-3 rounded-md border border-neutral-700 animate-fade-in">
+                                    <li key={p.id} className="flex justify-between items-center bg-neutral-800 p-3 rounded-md border border-neutral-700 animate-fade-in group">
                                         <div className="flex items-center gap-3">
                                             <div className="w-8 h-8 rounded-full flex items-center justify-center text-black font-bold shadow-sm" style={{ backgroundColor: p.color }}>
                                                 {p.name.charAt(0).toUpperCase()}
                                             </div>
                                             <span className="font-semibold text-lg">{p.name}</span>
                                         </div>
-                                        <span className={`text-xs px-2 py-1 rounded font-bold ${p.difficulty === 'EXPERT' ? 'bg-red-900/50 text-red-200 border border-red-800' :
-                                            p.difficulty === 'PRO' ? 'bg-yellow-900/50 text-yellow-200 border border-yellow-800' :
-                                                'bg-blue-900/50 text-blue-200 border border-blue-800'
-                                            }`}>{p.difficulty}</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-xs px-2 py-1 rounded font-bold ${p.difficulty === 'EXPERT' ? 'bg-red-900/50 text-red-200 border border-red-800' :
+                                                p.difficulty === 'PRO' ? 'bg-yellow-900/50 text-yellow-200 border border-yellow-800' :
+                                                    'bg-blue-900/50 text-blue-200 border border-blue-800'
+                                                }`}>{p.difficulty}</span>
+                                            <button
+                                                onClick={() => dispatch({ type: 'REMOVE_PLAYER', payload: { playerId: p.id } })}
+                                                className="text-neutral-500 hover:text-red-500 transition-colors p-1 opacity-0 group-hover:opacity-100"
+                                                title="Remove Player"
+                                            >
+                                                ×
+                                            </button>
+                                        </div>
                                     </li>
                                 ))}
                             </ul>
@@ -167,13 +201,27 @@ export const SetupScreen: React.FC = () => {
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-xs text-neutral-400 uppercase font-bold tracking-wider">Playlist ID</label>
-                            <input
-                                type="text"
-                                value={playlistId}
-                                onChange={(e) => setPlaylistId(e.target.value)}
-                                className="w-full bg-neutral-700 text-neutral-300 px-3 py-2 rounded text-sm font-mono focus:ring-1 focus:ring-green-500 outline-none"
-                            />
+                            <label className="text-xs text-neutral-400 uppercase font-bold tracking-wider">Playlist</label>
+
+                            <select
+                                value={selectedPlaylistOption}
+                                onChange={handlePlaylistChange}
+                                className="w-full bg-neutral-700 text-neutral-300 px-3 py-2 rounded text-sm mb-2 outline-none focus:ring-1 focus:ring-green-500"
+                            >
+                                {PRESET_PLAYLISTS.map(p => (
+                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                ))}
+                            </select>
+
+                            {selectedPlaylistOption === 'CUSTOM' && (
+                                <input
+                                    type="text"
+                                    placeholder="Enter Spotify Playlist ID"
+                                    value={playlistId}
+                                    onChange={(e) => setPlaylistId(e.target.value)}
+                                    className="w-full bg-neutral-800 text-white px-3 py-2 rounded text-sm font-mono focus:ring-1 focus:ring-green-500 outline-none border border-neutral-600 animate-fade-in"
+                                />
+                            )}
                         </div>
                     </div>
 

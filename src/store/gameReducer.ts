@@ -3,6 +3,7 @@ import { type GameState, type Song, type Player, type Difficulty } from '../type
 export type GameAction =
     | { type: 'SET_TOKEN'; payload: string }
     | { type: 'ADD_PLAYER'; payload: { name: string; difficulty: Difficulty; color: string } }
+    | { type: 'REMOVE_PLAYER'; payload: { playerId: string } }
     | { type: 'START_GAME'; payload: { playlistId: string; playlistName: string; targetScore: number } }
     | { type: 'NEXT_TURN' }
     | { type: 'SET_CURRENT_SONG'; payload: Song }
@@ -64,6 +65,12 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
                 ]
             };
 
+        case 'REMOVE_PLAYER':
+            return {
+                ...state,
+                players: state.players.filter(p => p.id !== action.payload.playerId)
+            };
+
         case 'START_GAME':
             return {
                 ...state,
@@ -92,15 +99,25 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
                 })
             };
 
-        case 'NEXT_TURN':
+        case 'NEXT_TURN': {
+            let nextIndex = (state.activePlayerIndex + 1) % state.players.length;
+            let loopCount = 0;
+            // Skip over players who have already won
+            while (state.players[nextIndex].hasWon && loopCount < state.players.length) {
+                nextIndex = (nextIndex + 1) % state.players.length;
+                loopCount++;
+            }
+            // Logic for "End Game" if no players left could go here, but UI handles "Game Over"
+
             return {
                 ...state,
-                activePlayerIndex: (state.activePlayerIndex + 1) % state.players.length,
+                activePlayerIndex: nextIndex,
                 currentPhase: 'PRE_TURN',
                 currentSong: null,
                 challengerIds: [],
                 lastResult: undefined
             };
+        }
 
         case 'SET_CURRENT_SONG':
             return {

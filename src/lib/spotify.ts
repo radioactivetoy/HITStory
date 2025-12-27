@@ -1,5 +1,6 @@
 export const CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID || '';
-export const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || 'http://127.0.0.1:5173/callback';
+const BASE_URI = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:5173';
+export const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || `${BASE_URI}/callback`;
 export const AUTH_ENDPOINT = 'https://accounts.spotify.com/authorize';
 export const RESPONSE_TYPE = 'token';
 export const SCOPES = [
@@ -120,18 +121,64 @@ export const fetchRandomTrack = async (token: string, playlistId: string, totalT
         method: "GET", headers: { Authorization: `Bearer ${token}` }
     });
     const data = await result.json();
-    // Handle case where track is null or linking is weird
-    return data.items?.[0]?.track;
+
+    // Original Track
+    const originalTrack = data.items?.[0]?.track;
+    if (!originalTrack) return null;
+
+    // Attempt Deep Search for a potentially older version
+    const olderTrack = await searchForEarliestTrack(
+        token,
+        originalTrack.artists[0].name,
+        originalTrack.name,
+        originalTrack.duration_ms
+    );
+
+    if (olderTrack) {
+        // If we found an older version, use its Album info but KEEP the original URI for playback reliability?
+        // ACTUALLY: The older version might not be playable or might be different audio. 
+        // ideally we want the *date* of the older one, but play the *original* one (guaranteed to be in playlist).
+        // HOWEVER: The prompts/cards show the Album Image.
+        // If we show the 1975 Album Image and play the 2011 Remaster, that's fine.
+        // If we show the 2011 Remaster Image and say "1975", that's slightly confusing but acceptable.
+
+        // Let's swap the WHOLE track object to the older one.
+        // PRO: Correct Album Art (Vintage) + Correct Date.
+        // CON: Might be unplayable territory restricted?
+        // Risk: The search result might not be playable in the user's region.
+        // The original from the playlist *is* presumably playable.
+
+        // HYBRID APPROACH:
+        // Use the Older Track's metadata (Album keys), but potentially keep the URI of the original if we are paranoid.
+        // But simplifying: Let's try returning the Older Track. If it fails to play, we might need a fallback.
+        // Given this is "hitster", the *Date* is the most critical gameplay element.
+
+        // Let's return the Older Track but verify it's playable? 
+        // Search API returns `is_playable` allowed fields usually.
+
+        // SAFEST BET for Game Mechanics:
+        // Return the Older Track. It represents the "Truth".
+
+        console.log(`Deep Search: Swapped '${originalTrack.name}' (${originalTrack.album.release_date}) for '${olderTrack.name}' (${olderTrack.album.release_date})`);
+        return olderTrack;
+    }
+
+    return originalTrack;
 };
 
-export const playTrack = async (token: string, deviceId: string, trackUri: string) => {
+export const playTrack = async (token: string, deviceId: string, trackUri: string, positionMs?: number) => {
+    const body: any = { uris: [trackUri] };
+    if (positionMs !== undefined) {
+        body.position_ms = positionMs;
+    }
+
     const res = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
         method: "PUT",
         headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json"
         },
-        body: JSON.stringify({ uris: [trackUri] }),
+        body: JSON.stringify(body),
     });
     if (!res.ok) {
         console.error('Spotify Play Error:', res.status, await res.text());
@@ -143,6 +190,19 @@ export const pauseTrack = async (token: string, deviceId: string) => {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}` }
     });
+};
+
+export const resumeTrack = async (token: string, deviceId: string) => {
+    const res = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+        method: "PUT",
+        headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+        },
+    });
+    if (!res.ok) {
+        console.error('Spotify Resume Error:', res.status, await res.text());
+    }
 };
 
 export const getPlaybackState = async (token: string) => {
@@ -159,4 +219,59 @@ export const seekTrack = async (token: string, deviceId: string, positionMs: num
         method: "PUT",
         headers: { Authorization: `Bearer ${token}` }
     });
+};
+
+// --- Deep Search Helper for Accurate Years ---
+
+const cleanTrackName = (name: string): string => {
+    return name
+        .replace(/ - Remastered \d{4}/g, '')
+        .replace(/ - Remastered/g, '')
+        .replace(/ \(Remastered \d{4}\)/g, '')
+        .replace(/ \(Remastered\)/g, '')
+        .replace(/ - \d{4} Remaster/g, '')
+        .replace(/ - Live/g, '')
+        .replace(/ \(Live\)/g, '')
+        .replace(/ - Radio Edit/g, '')
+        .replace(/ - Edit/g, '')
+        .replace(/ - Mono/g, '')
+        .replace(/ - Stereo/g, '')
+        .split(' - ')[0] // Aggressive: take the main title if there's a dash separator we missed
+        .trim();
+};
+
+const searchForEarliestTrack = async (token: string, artistName: string, trackName: string, originalDurationMs: number) => {
+    try {
+        const query = `track:${cleanTrackName(trackName)} artist:${artistName}`;
+        // Fetch top 10 results (usually enough to find the original)
+        const res = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=10`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+
+        const data = await res.json();
+        if (!data.tracks || !data.tracks.items) return null;
+
+        // Filter and Sort
+        const candidates = data.tracks.items.filter((t: any) => {
+            // 1. Must match artist loosely (primary artist should be in there)
+            const artistMatch = t.artists.some((a: any) => a.name.toLowerCase().includes(artistName.toLowerCase()));
+            // 2. Duration safety check (allow +/- 30 seconds variance for radio edits vs album versions)
+            const durationMatch = Math.abs(t.duration_ms - originalDurationMs) < 30000;
+            return artistMatch && durationMatch;
+        });
+
+        if (candidates.length === 0) return null;
+
+        // Sort by release date (Oldest first)
+        candidates.sort((a: any, b: any) => {
+            const dateA = new Date(a.album.release_date).getTime();
+            const dateB = new Date(b.album.release_date).getTime();
+            return dateA - dateB;
+        });
+
+        return candidates[0]; // Return the oldest one
+    } catch (e) {
+        console.warn("Deep Search Failed:", e);
+        return null;
+    }
 };
