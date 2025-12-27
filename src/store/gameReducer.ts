@@ -99,15 +99,25 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
                 })
             };
 
-        case 'NEXT_TURN':
+        case 'NEXT_TURN': {
+            let nextIndex = (state.activePlayerIndex + 1) % state.players.length;
+            let loopCount = 0;
+            // Skip over players who have already won
+            while (state.players[nextIndex].hasWon && loopCount < state.players.length) {
+                nextIndex = (nextIndex + 1) % state.players.length;
+                loopCount++;
+            }
+            // Logic for "End Game" if no players left could go here, but UI handles "Game Over"
+
             return {
                 ...state,
-                activePlayerIndex: (state.activePlayerIndex + 1) % state.players.length,
+                activePlayerIndex: nextIndex,
                 currentPhase: 'PRE_TURN',
                 currentSong: null,
                 challengerIds: [],
                 lastResult: undefined
             };
+        }
 
         case 'SET_CURRENT_SONG':
             return {
