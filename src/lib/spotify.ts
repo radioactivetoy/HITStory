@@ -165,14 +165,19 @@ export const fetchRandomTrack = async (token: string, playlistId: string, totalT
     return originalTrack;
 };
 
-export const playTrack = async (token: string, deviceId: string, trackUri: string) => {
+export const playTrack = async (token: string, deviceId: string, trackUri: string, positionMs?: number) => {
+    const body: any = { uris: [trackUri] };
+    if (positionMs !== undefined) {
+        body.position_ms = positionMs;
+    }
+
     const res = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
         method: "PUT",
         headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json"
         },
-        body: JSON.stringify({ uris: [trackUri] }),
+        body: JSON.stringify(body),
     });
     if (!res.ok) {
         console.error('Spotify Play Error:', res.status, await res.text());

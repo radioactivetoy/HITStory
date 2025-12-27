@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useGame } from '../context/GameContext';
 import { Timeline } from './Timeline';
-import { fetchPlaylist, fetchRandomTrack, playTrack, pauseTrack, getPlaybackState, seekTrack } from '../lib/spotify';
+import { fetchPlaylist, fetchRandomTrack, playTrack, pauseTrack, getPlaybackState, seekTrack, resumeTrack } from '../lib/spotify';
 import { Play, RefreshCw, Pause, RotateCcw, FastForward, Rewind, ListMusic, Coins } from 'lucide-react';
 import { ResultModal } from './ResultModal';
 import GameLogo from '../assets/HITStory_Logo.png';
@@ -43,6 +43,13 @@ export const GameScreen: React.FC = () => {
                     if (s && s.item) {
                         setProgressMs(s.progress_ms);
                         setDurationMs(s.item.duration_ms);
+                        // Sync Play/Pause state from external sources (or auto-play)
+                        if (isPlaying !== s.is_playing) {
+                            setIsPlaying(s.is_playing);
+                        }
+                    } else if (s === null && isPlaying) {
+                        // Playback stopped/finished
+                        setIsPlaying(false);
                     }
                 });
             }, 1000);
@@ -570,9 +577,10 @@ export const GameScreen: React.FC = () => {
                                                                 await resumeTrack(token, deviceId);
                                                                 setIsPlaying(true);
                                                             } catch (err) {
-                                                                console.warn("Resume failed, restarting track", err);
-                                                                // Fallback: Restart logic
-                                                                await playTrack(token, deviceId, state.currentSong.uri);
+                                                                console.warn("Resume failed, restarting track at position", err);
+                                                                // Fallback: Restart logic BUT with position
+                                                                const fallbackPos = progressMs || 0;
+                                                                await playTrack(token, deviceId, state.currentSong.uri, fallbackPos);
                                                                 setIsPlaying(true);
                                                             }
                                                         }
