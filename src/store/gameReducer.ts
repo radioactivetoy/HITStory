@@ -3,6 +3,7 @@ import { type GameState, type Song, type Player, type Difficulty } from '../type
 export type GameAction =
     | { type: 'SET_TOKEN'; payload: string }
     | { type: 'ADD_PLAYER'; payload: { name: string; difficulty: Difficulty; color: string } }
+    | { type: 'REMOVE_PLAYER'; payload: { playerId: string } }
     | { type: 'START_GAME'; payload: { playlistId: string; playlistName: string; targetScore: number } }
     | { type: 'NEXT_TURN' }
     | { type: 'SET_CURRENT_SONG'; payload: Song }
@@ -62,6 +63,12 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
                         color: action.payload.color || COLORS[state.players.length % COLORS.length]
                     }
                 ]
+            };
+
+        case 'REMOVE_PLAYER':
+            return {
+                ...state,
+                players: state.players.filter(p => p.id !== action.payload.playerId)
             };
 
         case 'START_GAME':

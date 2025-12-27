@@ -257,35 +257,42 @@ export const GameScreen: React.FC = () => {
         <div className="min-h-screen w-full bg-transparent text-white flex flex-col items-center">
             <div className="w-full p-4 bg-neutral-800 shadow-md flex justify-between items-center">
                 <div className="flex items-center gap-6">
-                    <img src={GameLogo} alt="HITStory" className="h-20 w-auto object-contain" />
-                    {state.settings.playlistName && (
-                        <div className="hidden md:flex items-center gap-2 bg-white/5 border border-white/10 px-4 py-2 rounded-xl backdrop-blur-sm shadow-sm">
-                            <ListMusic size={16} className="text-green-400" />
-                            <span className="text-sm font-bold text-neutral-200 tracking-wide truncate max-w-[200px]">
-                                {state.settings.playlistName}
-                            </span>
+                    {/* Brand Capsule */}
+                    <div className="flex items-center gap-3 bg-white/5 backdrop-blur-md rounded-full pr-5 pl-1 py-1 border border-white/10 shadow-lg hover:bg-white/10 transition-colors group cursor-default">
+                        <div className="bg-black/20 rounded-full p-2 flex items-center justify-center overflow-hidden w-20 h-20 shadow-inner decoration-clone">
+                            <img src={GameLogo} alt="HITStory" className="h-full w-full object-contain mix-blend-screen transform scale-[1.75]" />
                         </div>
-                    )}
+                        <div className="h-8 w-px bg-white/10"></div>
+                        <div className="flex flex-col justify-center">
+                            <span className="text-[10px] text-neutral-400 font-bold tracking-widest uppercase leading-none mb-1">Playing From</span>
+                            <div className="flex items-center gap-2">
+                                <ListMusic size={14} className="text-green-400" />
+                                <span className="text-sm font-bold text-white tracking-wide truncate max-w-[200px] leading-none">
+                                    {state.settings.playlistName || 'Unknown Playlist'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-6">
                     <div className="flex gap-4">
                         {state.players.map((p, i) => (
-                            <div key={p.id} className={`flex items-center gap-3 px-4 py-2 rounded-full border transition-all ${p.hasWon ? 'bg-black/40 border-yellow-500/50 opacity-70' : i === state.activePlayerIndex ? 'bg-green-500/20 border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-neutral-800 border-neutral-700'}`}>
+                            <div key={p.id} className={`flex items-center gap-3 px-5 py-3 rounded-full border transition-all relative overflow-hidden ${p.hasWon ? 'bg-black/40 border-yellow-500/50 opacity-70' : i === state.activePlayerIndex ? 'bg-green-500/20 border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-neutral-800 border-neutral-700'}`} style={{ borderLeftWidth: '4px', borderLeftColor: p.color }}>
                                 <div className="flex flex-col leading-none">
-                                    <span className={`font-bold text-sm ${p.hasWon ? 'text-yellow-500' : i === state.activePlayerIndex ? 'text-green-400' : 'text-neutral-300'}`}>
+                                    <span style={{ color: p.color }} className={`font-bold text-sm ${p.hasWon ? 'text-yellow-500' : ''}`}> {/* Use player color for name */}
                                         {p.name}
                                     </span>
                                     <span className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">
                                         {p.hasWon ? 'WINNER' : i === state.activePlayerIndex ? 'ACTIVE' : 'WAITING'}
                                     </span>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <div className="flex items-center gap-1 bg-black/30 px-2 py-1 rounded-full border border-white/10" title="Tokens">
-                                        <Coins size={12} className="text-yellow-500" />
+                                <div className="flex flex-col gap-1 items-end">
+                                    <div className="flex items-center gap-2 bg-black/30 px-2 py-0.5 rounded-full border border-white/10 w-full justify-between" title="Tokens">
+                                        <Coins size={14} className="text-yellow-500" />
                                         <span className="text-sm font-bold">{p.tokens}</span>
                                     </div>
-                                    <div className="flex items-center gap-1 bg-black/30 px-2 py-1 rounded-full border border-white/10" title="Cards Collected">
+                                    <div className="flex items-center gap-2 bg-black/30 px-2 py-0.5 rounded-full border border-white/10 w-full justify-between" title="Cards Collected">
                                         <span className="text-xs font-bold text-blue-400">🎵</span>
                                         <span className="text-sm font-bold">{p.timeline.length}</span>
                                     </div>
@@ -644,7 +651,7 @@ export const GameScreen: React.FC = () => {
                                     Order will be randomized!
                                 </p>
 
-                                <div className="grid grid-cols-2 gap-4 mb-6">
+                                <div className="grid grid-cols-3 gap-3 mb-4">
                                     {state.players.filter(p => !p.hasWon && p.id !== activePlayer.id).map(p => {
                                         const isSelected = state.challengeQueue.includes(p.id);
                                         const canAfford = p.tokens > 0;
@@ -653,18 +660,22 @@ export const GameScreen: React.FC = () => {
                                                 key={p.id}
                                                 disabled={!canAfford}
                                                 onClick={() => dispatch({ type: 'TOGGLE_CHALLENGER', payload: { playerId: p.id } })}
-                                                className={`p-4 rounded-lg border-2 flex items-center justify-between transition-all ${isSelected
-                                                    ? 'bg-yellow-500/20 border-yellow-500 text-yellow-500'
-                                                    : canAfford ? 'bg-neutral-700 border-transparent hover:bg-neutral-600' : 'bg-neutral-800 border-neutral-700 opacity-50 cursor-not-allowed'
+                                                style={{
+                                                    borderColor: p.color,
+                                                    backgroundColor: isSelected ? `${p.color}33` : (canAfford ? `${p.color}0D` : 'transparent'),
+                                                    boxShadow: isSelected ? `0 0 15px ${p.color}40` : 'none'
+                                                }}
+                                                className={`p-2 rounded-lg border-2 flex flex-col items-center justify-center gap-1 transition-all text-sm ${isSelected
+                                                    ? 'text-white scale-105'
+                                                    : canAfford ? 'hover:brightness-125' : 'opacity-40 cursor-not-allowed border-neutral-700'
                                                     }`}
                                             >
-                                                <span className="font-bold">{p.name}</span>
-                                                <div className="flex items-center gap-2 text-xs">
-                                                    <div className="w-5 h-5 bg-yellow-500 text-black rounded-full flex items-center justify-center font-bold">
-                                                        {p.tokens}
-                                                    </div>
-                                                    {isSelected && <span className="font-bold">READY</span>}
+                                                <span className="font-bold truncate w-full text-center" style={{ color: isSelected ? 'white' : p.color }}>{p.name}</span>
+                                                <div className="flex items-center gap-1 text-[10px] bg-black/40 px-2 py-0.5 rounded-full">
+                                                    <span className={`font-bold ${isSelected ? 'text-yellow-400' : 'text-neutral-300'}`}>{p.tokens}</span>
+                                                    <Coins size={10} className={isSelected ? "text-yellow-400" : "text-neutral-400"} />
                                                 </div>
+                                                {isSelected && <span className="font-bold text-[10px] animate-pulse" style={{ color: p.color }}>READY</span>}
                                             </button>
                                         );
                                     })}
