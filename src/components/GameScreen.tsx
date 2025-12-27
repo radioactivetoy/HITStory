@@ -496,145 +496,140 @@ export const GameScreen: React.FC = () => {
 
                 {
                     state.currentPhase === 'LISTENING' && (
-                        <div className="flex flex-col items-center gap-6">
-                            <div className="flex items-center gap-8">
-                                {/* Rewind Button */}
-                                <button
-                                    onClick={async () => {
-                                        if (!token || !deviceId) return;
-                                        try {
-                                            const state = await getPlaybackState(token);
-                                            if (state && state.progress_ms !== null) {
-                                                const newPos = Math.max(0, state.progress_ms - 20000);
-                                                await seekTrack(token, deviceId, newPos);
-                                            }
-                                        } catch (e) {
-                                            console.error("Seek failed", e);
-                                        }
-                                    }}
-                                    className="p-3 rounded-full bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-all border border-neutral-700 hover:border-neutral-500"
-                                    title="-20s"
-                                >
-                                    <Rewind size={24} />
-                                </button>
-
-                                {/* Main Playback Circle with SVG Progress */}
-                                <div className="relative w-32 h-32 flex items-center justify-center">
-                                    {/* Pulse Effects */}
-                                    {isPlaying && (
-                                        <>
-                                            <div className="absolute inset-0 bg-green-500/30 rounded-full animate-ping" />
-                                            <div className="absolute inset-0 bg-green-500/20 rounded-full animate-pulse blur-xl" />
-                                        </>
-                                    )}
-
-                                    {/* SVG Progress Ring */}
-                                    <svg className="absolute inset-0 transform -rotate-90 pointer-events-none" width="128" height="128">
-                                        <circle
-                                            stroke="rgba(34, 197, 94, 0.2)"
-                                            strokeWidth="4"
-                                            fill="transparent"
-                                            r="60"
-                                            cx="64"
-                                            cy="64"
-                                        />
-                                        <circle
-                                            stroke="#22c55e"
-                                            strokeWidth="4"
-                                            fill="transparent"
-                                            r="60"
-                                            cx="64"
-                                            cy="64"
-                                            strokeDasharray={2 * Math.PI * 60}
-                                            strokeDashoffset={2 * Math.PI * 60 - (progressMs / (durationMs || 1)) * 2 * Math.PI * 60}
-                                            strokeLinecap="round"
-                                            className="transition-all duration-300 linear" // Use linear for smoother progress if we had faster updates, usually ease-out looks ok-ish for 1s
-                                        />
-                                    </svg>
-
-                                    <div className="w-24 h-24 bg-neutral-900 rounded-full flex items-center justify-center relative overflow-hidden group z-10 shadow-lg border border-neutral-700">
-                                        <button
-                                            onClick={async () => {
-                                                if (!token || !deviceId || !state.currentSong) return;
-                                                if (isPlaying) {
-                                                    await pauseTrack(token, deviceId);
-                                                    setIsPlaying(false);
-                                                } else {
-                                                    await playTrack(token, deviceId, state.currentSong.uri);
-                                                    setIsPlaying(true);
-                                                }
-                                            }}
-                                            className="w-full h-full flex items-center justify-center hover:bg-white/10 transition-colors"
-                                        >
-                                            {isPlaying ? (
-                                                <Pause fill="currentColor" className="text-white w-8 h-8" />
-                                            ) : (
-                                                <Play fill="currentColor" className="text-white w-8 h-8 ml-1" />
-                                            )}
-                                        </button>
-                                    </div>
+                        <div className="flex flex-col items-center gap-6 w-full max-w-4xl">
+                            <div className="flex items-center justify-center gap-12 w-full">
+                                {/* Left Side: Discard Button */}
+                                <div className="flex flex-col items-center">
+                                    <button
+                                        onClick={() => dispatch({ type: 'SKIP_SONG' })}
+                                        disabled={activePlayer.tokens < 1}
+                                        className={`flex flex-col items-center gap-3 group transition-all ${activePlayer.tokens >= 1 ? 'opacity-100 hover:text-yellow-400' : 'opacity-40 cursor-not-allowed'}`}
+                                        title="Discard current card (Costs 1 Token)"
+                                    >
+                                        <div className={`p-6 rounded-full border-2 transition-all transform group-hover:scale-110 shadow-xl ${activePlayer.tokens >= 1 ? 'bg-yellow-500/10 border-yellow-500 group-hover:bg-yellow-500/20 group-hover:shadow-[0_0_20px_rgba(234,179,8,0.4)]' : 'bg-neutral-800 border-neutral-700'}`}>
+                                            <RefreshCw size={32} className={activePlayer.tokens >= 1 ? "text-yellow-500" : "text-neutral-500"} />
+                                        </div>
+                                        <span className="text-sm font-bold uppercase tracking-widest text-neutral-400 group-hover:text-white">Discard (-1)</span>
+                                    </button>
                                 </div>
 
-                                {/* Fast Forward Button */}
-                                <button
-                                    onClick={async () => {
-                                        if (!token || !deviceId) return;
-                                        try {
-                                            const state = await getPlaybackState(token);
-                                            if (state && state.progress_ms !== null) {
-                                                const newPos = state.progress_ms + 20000;
-                                                await seekTrack(token, deviceId, newPos);
-                                            }
-                                        } catch (e) {
-                                            console.error("Seek failed", e);
-                                        }
-                                    }}
-                                    className="p-3 rounded-full bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-all border border-neutral-700 hover:border-neutral-500"
-                                    title="+20s"
-                                >
-                                    <FastForward size={24} />
-                                </button>
-                            </div>
+                                {/* Center: Player Controls */}
+                                <div className="flex flex-col items-center gap-4">
+                                    <div className="flex items-center gap-6">
+                                        {/* Rewind Button */}
+                                        <button
+                                            onClick={async () => {
+                                                if (!token || !deviceId) return;
+                                                try {
+                                                    const newPos = Math.max(0, progressMs - 20000);
+                                                    await seekTrack(token, deviceId, newPos);
+                                                    setProgressMs(newPos);
+                                                } catch (e) {
+                                                    console.error("Seek failed", e);
+                                                }
+                                            }}
+                                            className="p-6 rounded-full bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-all border-2 border-neutral-700 hover:border-neutral-500 hover:scale-110 shadow-xl"
+                                            title="-20s"
+                                        >
+                                            <Rewind size={40} />
+                                        </button>
 
-                            {/* Restart Button */}
-                            <button
-                                onClick={async () => {
-                                    if (!token || !deviceId || !state.currentSong) return;
-                                    await playTrack(token, deviceId, state.currentSong.uri);
-                                    setIsPlaying(true);
-                                }}
-                                className="text-xs text-neutral-400 flex items-center gap-1 hover:text-white transition-colors"
-                            >
-                                <RotateCcw size={12} /> Restart Song
-                            </button>
+                                        {/* Main Playback Circle */}
+                                        <div className="relative w-36 h-36 flex items-center justify-center">
+                                            {isPlaying && (
+                                                <>
+                                                    <div className="absolute inset-0 bg-green-500/30 rounded-full animate-ping" />
+                                                    <div className="absolute inset-0 bg-green-500/20 rounded-full animate-pulse blur-xl" />
+                                                </>
+                                            )}
+                                            <svg className="absolute inset-0 transform -rotate-90 pointer-events-none" width="144" height="144">
+                                                <circle stroke="rgba(34, 197, 94, 0.2)" strokeWidth="4" fill="transparent" r="68" cx="72" cy="72" />
+                                                <circle
+                                                    stroke="#22c55e"
+                                                    strokeWidth="4"
+                                                    fill="transparent"
+                                                    r="68"
+                                                    cx="72"
+                                                    cy="72"
+                                                    strokeDasharray={2 * Math.PI * 68}
+                                                    strokeDashoffset={2 * Math.PI * 68 - (progressMs / (durationMs || 1)) * 2 * Math.PI * 68}
+                                                    strokeLinecap="round"
+                                                    className="transition-all duration-300 linear"
+                                                />
+                                            </svg>
+                                            <div className="w-28 h-28 bg-neutral-900 rounded-full flex items-center justify-center relative overflow-hidden group z-10 shadow-2xl border border-neutral-700">
+                                                <button
+                                                    onClick={async () => {
+                                                        if (!token || !deviceId || !state.currentSong) return;
+                                                        if (isPlaying) {
+                                                            await pauseTrack(token, deviceId);
+                                                            setIsPlaying(false);
+                                                        } else {
+                                                            // Try Resume first
+                                                            try {
+                                                                await resumeTrack(token, deviceId);
+                                                                setIsPlaying(true);
+                                                            } catch (err) {
+                                                                console.warn("Resume failed, restarting track", err);
+                                                                // Fallback: Restart logic
+                                                                await playTrack(token, deviceId, state.currentSong.uri);
+                                                                setIsPlaying(true);
+                                                            }
+                                                        }
+                                                    }}
+                                                    className="w-full h-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                                                >
+                                                    {isPlaying ? <Pause fill="currentColor" className="text-white w-16 h-16" /> : <Play fill="currentColor" className="text-white w-16 h-16 ml-2" />}
+                                                </button>
+                                            </div>
+                                        </div>
 
-                            {/* Token Actions Dock */}
-                            <div className="glass-dock px-8 py-4 rounded-full flex gap-6 items-center mt-8 transform hover:scale-105 transition-all duration-300">
-                                <button
-                                    onClick={() => dispatch({ type: 'SKIP_SONG' })}
-                                    disabled={activePlayer.tokens < 1}
-                                    className={`flex flex-col items-center gap-1 group transition-all ${activePlayer.tokens >= 1 ? 'opacity-100 hover:text-yellow-400' : 'opacity-40 cursor-not-allowed'}`}
-                                    title="Discard current card (Costs 1 Token)"
-                                >
-                                    <div className={`p-3 rounded-full border transition-all ${activePlayer.tokens >= 1 ? 'bg-yellow-500/10 border-yellow-500 group-hover:bg-yellow-500/20 group-hover:shadow-[0_0_15px_rgba(234,179,8,0.3)]' : 'bg-neutral-800 border-neutral-700'}`}>
-                                        <RefreshCw size={20} className={activePlayer.tokens >= 1 ? "text-yellow-500" : "text-neutral-500"} />
+                                        {/* Fast Forward Button */}
+                                        <button
+                                            onClick={async () => {
+                                                if (!token || !deviceId) return;
+                                                try {
+                                                    const newPos = (progressMs || 0) + 20000;
+                                                    await seekTrack(token, deviceId, newPos);
+                                                    setProgressMs(newPos);
+                                                } catch (e) {
+                                                    console.error("Seek failed", e);
+                                                }
+                                            }}
+                                            className="p-6 rounded-full bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-all border-2 border-neutral-700 hover:border-neutral-500 hover:scale-110 shadow-xl"
+                                            title="+20s"
+                                        >
+                                            <FastForward size={40} />
+                                        </button>
                                     </div>
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 group-hover:text-neutral-200">Discard (-1)</span>
-                                </button>
 
-                                <div className="w-px h-8 bg-white/10"></div>
+                                    {/* Restart Button */}
+                                    <button
+                                        onClick={async () => {
+                                            if (!token || !deviceId || !state.currentSong) return;
+                                            await playTrack(token, deviceId, state.currentSong.uri);
+                                            setIsPlaying(true);
+                                        }}
+                                        className="text-xs text-neutral-500 flex items-center gap-1 hover:text-white transition-colors uppercase font-bold tracking-wide"
+                                    >
+                                        <RotateCcw size={10} /> Restart
+                                    </button>
+                                </div>
 
-                                <button
-                                    onClick={() => dispatch({ type: 'AUTO_PLACE_SONG' })}
-                                    disabled={activePlayer.tokens < 3}
-                                    className={`flex flex-col items-center gap-1 group transition-all ${activePlayer.tokens >= 3 ? 'opacity-100 hover:text-blue-400' : 'opacity-40 cursor-not-allowed'}`}
-                                    title="Auto-place card correctly (Costs 3 Tokens)"
-                                >
-                                    <div className={`p-3 rounded-full border transition-all ${activePlayer.tokens >= 3 ? 'bg-blue-500/10 border-blue-500 group-hover:bg-blue-500/20 group-hover:shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'bg-neutral-800 border-neutral-700'}`}>
-                                        <Play size={20} className={activePlayer.tokens >= 3 ? "text-blue-500" : "text-neutral-500"} />
-                                    </div>
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 group-hover:text-neutral-200">Auto Play (-3)</span>
-                                </button>
+                                {/* Right Side: Auto Play Button */}
+                                <div className="flex flex-col items-center">
+                                    <button
+                                        onClick={() => dispatch({ type: 'AUTO_PLACE_SONG' })}
+                                        disabled={activePlayer.tokens < 3}
+                                        className={`flex flex-col items-center gap-3 group transition-all ${activePlayer.tokens >= 3 ? 'opacity-100 hover:text-blue-400' : 'opacity-40 cursor-not-allowed'}`}
+                                        title="Auto-place card correctly (Costs 3 Tokens)"
+                                    >
+                                        <div className={`p-6 rounded-full border-2 transition-all transform group-hover:scale-110 shadow-xl ${activePlayer.tokens >= 3 ? 'bg-blue-500/10 border-blue-500 group-hover:bg-blue-500/20 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.4)]' : 'bg-neutral-800 border-neutral-700'}`}>
+                                            <Play size={32} className={activePlayer.tokens >= 3 ? "text-blue-500" : "text-neutral-500"} />
+                                        </div>
+                                        <span className="text-sm font-bold uppercase tracking-widest text-neutral-400 group-hover:text-white">Auto Play (-3)</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )
