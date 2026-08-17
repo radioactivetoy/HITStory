@@ -2,7 +2,6 @@ export const CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID || '';
 const BASE_URI = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:5173';
 export const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || `${BASE_URI}/callback`;
 export const AUTH_ENDPOINT = 'https://accounts.spotify.com/authorize';
-export const RESPONSE_TYPE = 'token';
 export const SCOPES = [
     'streaming',
     'user-read-email',
@@ -56,7 +55,13 @@ export const setupPKCE = async () => {
 
 // --- Token Exchange ---
 
-export const getAccessToken = async (code: string) => {
+export interface TokenResult {
+    accessToken: string;
+    refreshToken: string | null;
+    expiresIn: number;
+}
+
+export const getAccessToken = async (code: string): Promise<TokenResult | null> => {
     const codeVerifier = window.localStorage.getItem('code_verifier');
     if (!codeVerifier) return null;
 
@@ -78,24 +83,75 @@ export const getAccessToken = async (code: string) => {
     const response = await body.json();
 
     if (response.access_token) {
-        return response.access_token; // Also refresh_token is here if needed
+        return {
+            accessToken: response.access_token,
+            refreshToken: response.refresh_token || null,
+            expiresIn: response.expires_in || 3600,
+        };
     } else {
         console.error("Token Exchange Error:", response);
     }
     return null;
 }
 
-// Deprecated implicit helpers
-export const loginUrl = ''; // We now use setupPKCE() async
+// PKCE public clients can refresh without a client secret.
+export const refreshAccessToken = async (refreshToken: string): Promise<TokenResult | null> => {
+    const payload = {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+            client_id: CLIENT_ID,
+            grant_type: 'refresh_token',
+            refresh_token: refreshToken,
+        }),
+    }
 
+    const body = await fetch("https://accounts.spotify.com/api/token", payload);
+    const response = await body.json();
+
+    if (response.access_token) {
+        return {
+            accessToken: response.access_token,
+            // Spotify may or may not rotate the refresh token; keep the old one if it doesn't.
+            refreshToken: response.refresh_token || refreshToken,
+            expiresIn: response.expires_in || 3600,
+        };
+    } else {
+        console.error("Token Refresh Error:", response);
+    }
+    return null;
+}
+
+// Fallback for old bookmarked/cached implicit-flow redirect links; PKCE (above) is the primary flow.
 export const getTokenFromUrl = (): string | null => {
-    // Legacy implicit handling
     const hash = window.location.hash;
     if (!hash) return null;
     return hash.substring(1).split('&').find(elem => elem.startsWith('access_token'))?.split('=')[1] || null;
 };
 
-// --- API Calls (Unchanged) ---
+export class SpotifyAuthError extends Error {
+    constructor(message = 'Spotify authorization expired') {
+        super(message);
+        this.name = 'SpotifyAuthError';
+    }
+}
+
+export interface SpotifyTrack {
+    id: string;
+    uri: string;
+    name: string;
+    duration_ms: number;
+    artists: { name: string }[];
+    album: {
+        name: string;
+        release_date: string;
+        images: { url: string }[];
+    };
+}
+
+// --- API Calls ---
 export const fetchProfile = async (token: string) => {
     const result = await fetch("https://api.spotify.com/v1/me", {
         method: "GET", headers: { Authorization: `Bearer ${token}` }
@@ -114,19 +170,24 @@ export const fetchPlaylist = async (token: string, playlistId: string) => {
     return data;
 }
 
-export const fetchRandomTrack = async (token: string, playlistId: string, totalTracks: number) => {
-    // Retry logic could be added here if offset fails
+export const fetchRandomTrack = async (
+    token: string,
+    playlistId: string,
+    totalTracks: number,
+    excludeIds?: Set<string>
+): Promise<SpotifyTrack | null> => {
     const offset = Math.floor(Math.random() * totalTracks);
     const result = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=1&offset=${offset}`, {
         method: "GET", headers: { Authorization: `Bearer ${token}` }
     });
     const data = await result.json();
 
-    // Original Track
-    const originalTrack = data.items?.[0]?.track;
-    if (!originalTrack) return null;
+    const originalTrack: SpotifyTrack | undefined = data.items?.[0]?.track;
+    if (!originalTrack || excludeIds?.has(originalTrack.id)) return null;
 
-    // Attempt Deep Search for a potentially older version
+    // Playlists often contain remasters/radio edits with a misleading release date;
+    // search for an earlier release of the same recording and prefer its metadata
+    // (correct year + period-accurate artwork) when one is found.
     const olderTrack = await searchForEarliestTrack(
         token,
         originalTrack.artists[0].name,
@@ -134,31 +195,7 @@ export const fetchRandomTrack = async (token: string, playlistId: string, totalT
         originalTrack.duration_ms
     );
 
-    if (olderTrack) {
-        // If we found an older version, use its Album info but KEEP the original URI for playback reliability?
-        // ACTUALLY: The older version might not be playable or might be different audio. 
-        // ideally we want the *date* of the older one, but play the *original* one (guaranteed to be in playlist).
-        // HOWEVER: The prompts/cards show the Album Image.
-        // If we show the 1975 Album Image and play the 2011 Remaster, that's fine.
-        // If we show the 2011 Remaster Image and say "1975", that's slightly confusing but acceptable.
-
-        // Let's swap the WHOLE track object to the older one.
-        // PRO: Correct Album Art (Vintage) + Correct Date.
-        // CON: Might be unplayable territory restricted?
-        // Risk: The search result might not be playable in the user's region.
-        // The original from the playlist *is* presumably playable.
-
-        // HYBRID APPROACH:
-        // Use the Older Track's metadata (Album keys), but potentially keep the URI of the original if we are paranoid.
-        // But simplifying: Let's try returning the Older Track. If it fails to play, we might need a fallback.
-        // Given this is "hitster", the *Date* is the most critical gameplay element.
-
-        // Let's return the Older Track but verify it's playable? 
-        // Search API returns `is_playable` allowed fields usually.
-
-        // SAFEST BET for Game Mechanics:
-        // Return the Older Track. It represents the "Truth".
-
+    if (olderTrack && !excludeIds?.has(olderTrack.id)) {
         console.log(`Deep Search: Swapped '${originalTrack.name}' (${originalTrack.album.release_date}) for '${olderTrack.name}' (${olderTrack.album.release_date})`);
         return olderTrack;
     }
@@ -167,7 +204,7 @@ export const fetchRandomTrack = async (token: string, playlistId: string, totalT
 };
 
 export const playTrack = async (token: string, deviceId: string, trackUri: string, positionMs?: number) => {
-    const body: any = { uris: [trackUri] };
+    const body: { uris: string[]; position_ms?: number } = { uris: [trackUri] };
     if (positionMs !== undefined) {
         body.position_ms = positionMs;
     }
@@ -182,14 +219,19 @@ export const playTrack = async (token: string, deviceId: string, trackUri: strin
     });
     if (!res.ok) {
         console.error('Spotify Play Error:', res.status, await res.text());
+        if (res.status === 401) throw new SpotifyAuthError();
     }
 };
 
 export const pauseTrack = async (token: string, deviceId: string) => {
-    await fetch(`https://api.spotify.com/v1/me/player/pause?device_id=${deviceId}`, {
+    const res = await fetch(`https://api.spotify.com/v1/me/player/pause?device_id=${deviceId}`, {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}` }
     });
+    if (!res.ok) {
+        console.error('Spotify Pause Error:', res.status, await res.text());
+        if (res.status === 401) throw new SpotifyAuthError();
+    }
 };
 
 export const resumeTrack = async (token: string, deviceId: string) => {
@@ -202,6 +244,7 @@ export const resumeTrack = async (token: string, deviceId: string) => {
     });
     if (!res.ok) {
         console.error('Spotify Resume Error:', res.status, await res.text());
+        if (res.status === 401) throw new SpotifyAuthError();
     }
 };
 
@@ -211,14 +254,19 @@ export const getPlaybackState = async (token: string) => {
         headers: { Authorization: `Bearer ${token}` }
     });
     if (result.status === 204) return null; // No Content
+    if (result.status === 401) throw new SpotifyAuthError();
     return await result.json();
 };
 
 export const seekTrack = async (token: string, deviceId: string, positionMs: number) => {
-    await fetch(`https://api.spotify.com/v1/me/player/seek?position_ms=${positionMs}&device_id=${deviceId}`, {
+    const res = await fetch(`https://api.spotify.com/v1/me/player/seek?position_ms=${positionMs}&device_id=${deviceId}`, {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}` }
     });
+    if (!res.ok) {
+        console.error('Spotify Seek Error:', res.status, await res.text());
+        if (res.status === 401) throw new SpotifyAuthError();
+    }
 };
 
 // --- Deep Search Helper for Accurate Years ---
@@ -240,7 +288,7 @@ const cleanTrackName = (name: string): string => {
         .trim();
 };
 
-const searchForEarliestTrack = async (token: string, artistName: string, trackName: string, originalDurationMs: number) => {
+const searchForEarliestTrack = async (token: string, artistName: string, trackName: string, originalDurationMs: number): Promise<SpotifyTrack | null> => {
     try {
         const query = `track:${cleanTrackName(trackName)} artist:${artistName}`;
         // Fetch top 10 results (usually enough to find the original)
@@ -251,25 +299,19 @@ const searchForEarliestTrack = async (token: string, artistName: string, trackNa
         const data = await res.json();
         if (!data.tracks || !data.tracks.items) return null;
 
-        // Filter and Sort
-        const candidates = data.tracks.items.filter((t: any) => {
-            // 1. Must match artist loosely (primary artist should be in there)
-            const artistMatch = t.artists.some((a: any) => a.name.toLowerCase().includes(artistName.toLowerCase()));
-            // 2. Duration safety check (allow +/- 30 seconds variance for radio edits vs album versions)
+        const candidates: SpotifyTrack[] = data.tracks.items.filter((t: SpotifyTrack) => {
+            // Must loosely match the primary artist, and be close in duration
+            // (allow +/- 30s for radio edits vs album versions).
+            const artistMatch = t.artists.some((a) => a.name.toLowerCase().includes(artistName.toLowerCase()));
             const durationMatch = Math.abs(t.duration_ms - originalDurationMs) < 30000;
             return artistMatch && durationMatch;
         });
 
         if (candidates.length === 0) return null;
 
-        // Sort by release date (Oldest first)
-        candidates.sort((a: any, b: any) => {
-            const dateA = new Date(a.album.release_date).getTime();
-            const dateB = new Date(b.album.release_date).getTime();
-            return dateA - dateB;
-        });
+        candidates.sort((a, b) => new Date(a.album.release_date).getTime() - new Date(b.album.release_date).getTime());
 
-        return candidates[0]; // Return the oldest one
+        return candidates[0]; // Oldest match
     } catch (e) {
         console.warn("Deep Search Failed:", e);
         return null;

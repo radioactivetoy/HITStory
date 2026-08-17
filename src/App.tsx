@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
-import { GameProvider, useGame } from './context/GameContext';
+import React from 'react';
+import { GameProvider } from './context/GameContext';
+import { useGame } from './context/useGame';
 import { SetupScreen } from './components/SetupScreen';
 import { WebPlayback } from './components/WebPlayback';
 import { GameScreen } from './components/GameScreen';

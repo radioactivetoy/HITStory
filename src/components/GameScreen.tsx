@@ -1,138 +1,153 @@
-import React, { useEffect, useState } from 'react';
-import { useGame } from '../context/GameContext';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useGame } from '../context/useGame';
 import { Timeline } from './Timeline';
-import { fetchPlaylist, fetchRandomTrack, playTrack, pauseTrack, getPlaybackState, seekTrack, resumeTrack } from '../lib/spotify';
+import { fetchPlaylist, fetchRandomTrack, playTrack, pauseTrack, getPlaybackState, seekTrack, resumeTrack, SpotifyAuthError, type SpotifyTrack } from '../lib/spotify';
+import { type Song } from '../types';
 import { Play, RefreshCw, Pause, RotateCcw, FastForward, Rewind, ListMusic, Coins } from 'lucide-react';
 import { ResultModal } from './ResultModal';
 import GameLogo from '../assets/HITStory_Logo.png';
 
+const trackToSong = (track: SpotifyTrack): Song => ({
+    id: track.id,
+    title: track.name,
+    artist: track.artists[0].name,
+    album: track.album.name,
+    year: parseInt(track.album.release_date.split('-')[0]),
+    image: track.album.images[0].url,
+    uri: track.uri
+});
+
 export const GameScreen: React.FC = () => {
-    const { state, dispatch, token, deviceId, logout, login } = useGame();
-    // ... [state decls] ...
+    const { state, dispatch, token, deviceId, logout, login, handleAuthError } = useGame();
 
-    // ...
-
-
-
-    // Auto-pause when revealing or game over
     const [playlistTotal, setPlaylistTotal] = useState<number>(0);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const [revealData, setRevealData] = useState<{ correct: boolean, actualYear: number } | null>(null);
     const [isPlaying, setIsPlaying] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
-    const [isChallengeModalOpen, setIsChallengeModalOpen] = useState(false);
-    const [placingBetPlayerId, setPlacingBetPlayerId] = useState<string | null>(null);
     const [progressMs, setProgressMs] = useState<number>(0);
     const [durationMs, setDurationMs] = useState<number>(0);
 
+    // Spotify's play/pause/resume commands take a few hundred ms to actually take effect
+    // on the device. Track when we last flipped isPlaying ourselves so the poller below
+    // doesn't immediately read stale state from Spotify and flip the icon back.
+    const lastManualToggleRef = useRef(0);
+    const setIsPlayingManual = useCallback((value: boolean) => {
+        lastManualToggleRef.current = Date.now();
+        setIsPlaying(value);
+    }, []);
+    const MANUAL_TOGGLE_GRACE_MS = 1500;
+
     // Poll for progress when playing
     useEffect(() => {
-        let interval: any;
+        let interval: ReturnType<typeof setInterval> | undefined;
         if (isPlaying && token) {
-            // Immediate update
-            getPlaybackState(token).then(s => {
-                if (s && s.item) {
-                    setProgressMs(s.progress_ms);
-                    setDurationMs(s.item.duration_ms);
-                }
-            });
-
-            interval = setInterval(() => {
+            const poll = () => {
                 getPlaybackState(token).then(s => {
+                    const withinGracePeriod = Date.now() - lastManualToggleRef.current < MANUAL_TOGGLE_GRACE_MS;
                     if (s && s.item) {
                         setProgressMs(s.progress_ms);
                         setDurationMs(s.item.duration_ms);
-                        // Sync Play/Pause state from external sources (or auto-play)
-                        if (isPlaying !== s.is_playing) {
+                        // Sync Play/Pause state from external sources (or auto-play),
+                        // but don't fight a toggle the user just made.
+                        if (!withinGracePeriod && isPlaying !== s.is_playing) {
                             setIsPlaying(s.is_playing);
                         }
-                    } else if (s === null && isPlaying) {
+                    } else if (s === null && isPlaying && !withinGracePeriod) {
                         // Playback stopped/finished
                         setIsPlaying(false);
                     }
+                }).catch(err => {
+                    if (err instanceof SpotifyAuthError) handleAuthError();
+                    else console.error('Playback poll failed', err);
                 });
-            }, 1000);
+            };
+
+            poll();
+            interval = setInterval(poll, 1000);
         }
         return () => clearInterval(interval);
-    }, [isPlaying, token]);
+    }, [isPlaying, token, handleAuthError]);
 
     // Auto-pause when revealing or game over
     useEffect(() => {
         if ((state.currentPhase === 'REVEAL' || state.currentPhase === 'GAME_OVER') && isPlaying) {
             if (token && deviceId) {
-                pauseTrack(token, deviceId).catch(err => console.error("Pause failed", err));
+                pauseTrack(token, deviceId).catch(err => {
+                    if (err instanceof SpotifyAuthError) handleAuthError();
+                    else console.error("Pause failed", err);
+                });
                 setIsPlaying(false);
             }
         }
-    }, [state.currentPhase, isPlaying, token, deviceId]);
+    }, [state.currentPhase, isPlaying, token, deviceId, handleAuthError]);
 
     const activePlayer = state.players[state.activePlayerIndex];
-
-
-
-
-
-
-
     useEffect(() => {
         if (!token || playlistTotal > 0 || !state.players.length) return;
         const pid = state.settings.playlistId || '2wc7CFraGUUOXYfeHWTfFY';
 
-        console.log('Fetching Playlist Info for:', pid);
         fetchPlaylist(token, pid).then(data => {
-            console.log('Playlist Info:', data);
             if (data && data.tracks) {
                 setPlaylistTotal(data.tracks.total);
+            } else if (data?.error?.status === 401) {
+                handleAuthError();
             } else {
                 console.error('Invalid playlist data:', data);
-                const errorMsg = data?.error?.message || 'Check Playlist ID';
-                setError(`Playlist Error: ${errorMsg}`);
+                setError(`Playlist Error: ${data?.error?.message || 'Check Playlist ID'}`);
             }
         }).catch(err => {
             console.error('Fetch Playlist Error:', err);
-            setError(`Network Error: ${err.message}`);
+            setError(`Network Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
         });
-    }, [token, playlistTotal, state.players.length, state.settings.playlistId]);
+    }, [token, playlistTotal, state.players.length, state.settings.playlistId, handleAuthError]);
+
+    // Guards against a second concurrent distribution (e.g. React StrictMode's double-invoke in dev)
+    // handing the same player two starting cards.
+    const distributingRef = useRef(false);
+
+    // Songs already drawn this game (dealt, played, or discarded) so the same track never repeats.
+    const getExcludedSongIds = useCallback(() => new Set([
+        ...state.playedSongIds,
+        ...state.players.flatMap(p => p.timeline.map(s => s.id))
+    ]), [state.playedSongIds, state.players]);
 
     // Initial Card Distribution Effect
     useEffect(() => {
         const distributeCards = async () => {
-            if (!token || playlistTotal === 0) return;
+            if (!token || playlistTotal === 0 || distributingRef.current) return;
             const playersNeedingCards = state.players.filter(p => p.timeline.length === 0);
-
             if (playersNeedingCards.length === 0) return;
 
-            console.log('Distributing initial cards to:', playersNeedingCards.length, 'players');
+            distributingRef.current = true;
             setIsLoading(true);
 
+            // Drawn sequentially (not Promise.all) so each player's exclusion set includes
+            // cards already dealt to earlier players in this same batch.
+            const excludeIds = getExcludedSongIds();
+            const pid = state.settings.playlistId || '37i9dQZF1DWTJzZ1pYFF9V';
+            const validUpdates: { playerId: string; song: Song }[] = [];
+
             try {
-                const pid = state.settings.playlistId || '37i9dQZF1DWTJzZ1pYFF9V';
-                const updates = await Promise.all(playersNeedingCards.map(async (player) => {
-                    let track = null;
+                for (const player of playersNeedingCards) {
+                    let track: SpotifyTrack | null = null;
                     let attempts = 0;
                     while (!track && attempts < 5) {
                         try {
-                            track = await fetchRandomTrack(token, pid, playlistTotal);
-                        } catch (e) { console.warn('Retry init card fetch', e); }
+                            track = await fetchRandomTrack(token, pid, playlistTotal, excludeIds);
+                        } catch (e) {
+                            if (e instanceof SpotifyAuthError) {
+                                handleAuthError();
+                                return;
+                            }
+                            console.warn('Retry init card fetch', e);
+                        }
                         attempts++;
                     }
+                    if (!track) continue;
+                    excludeIds.add(track.id);
+                    validUpdates.push({ playerId: player.id, song: trackToSong(track) });
+                }
 
-                    if (!track) return null;
-
-                    const song = {
-                        id: track.id,
-                        title: track.name,
-                        artist: track.artists[0].name,
-                        album: track.album.name,
-                        year: parseInt(track.album.release_date.split('-')[0]),
-                        image: track.album.images[0].url,
-                        uri: track.uri
-                    };
-                    return { playerId: player.id, song };
-                }));
-
-                const validUpdates = updates.filter((u): u is { playerId: string, song: any } => u !== null);
                 if (validUpdates.length > 0) {
                     dispatch({ type: 'DISTRIBUTE_INITIAL_CARDS', payload: validUpdates });
                 }
@@ -141,10 +156,11 @@ export const GameScreen: React.FC = () => {
                 setError('Failed to deal starting cards.');
             } finally {
                 setIsLoading(false);
+                distributingRef.current = false;
             }
         };
         distributeCards();
-    }, [token, playlistTotal, state.players, dispatch]); // Added playlistTotal to deps to run only when ready
+    }, [token, playlistTotal, state.players, state.settings.playlistId, dispatch, handleAuthError, getExcludedSongIds]);
 
     const handlePlaySong = async () => {
         if (isLoading) return;
@@ -163,17 +179,16 @@ export const GameScreen: React.FC = () => {
         }
 
         const pid = state.settings.playlistId || '37i9dQZF1DWTJzZ1pYFF9V';
+        const excludeIds = getExcludedSongIds();
 
         try {
-            console.log('Fetching random track from:', pid, 'Total:', playlistTotal);
-            let track = null;
+            let track: SpotifyTrack | null = null;
             let attempts = 0;
             const MAX_ATTEMPTS = 5;
 
             while (!track && attempts < MAX_ATTEMPTS) {
-                if (attempts > 0) console.log(`Retry fetching track (${attempts + 1}/${MAX_ATTEMPTS})...`);
                 try {
-                    track = await fetchRandomTrack(token, pid, playlistTotal);
+                    track = await fetchRandomTrack(token, pid, playlistTotal, excludeIds);
                 } catch (err) {
                     console.warn('Track fetch failed, retrying...', err);
                 }
@@ -181,29 +196,22 @@ export const GameScreen: React.FC = () => {
             }
 
             if (!track) {
-                setError("Failed to fetch a track after multiple attempts. Playlist might be empty or network down.");
+                setError("Failed to fetch a track after multiple attempts. Playlist might be empty, fully played, or network down.");
                 setIsLoading(false);
                 return;
             }
 
-            const song = {
-                id: track.id,
-                title: track.name,
-                artist: track.artists[0].name,
-                album: track.album.name,
-                year: parseInt(track.album.release_date.split('-')[0]),
-                image: track.album.images[0].url,
-                uri: track.uri
-            };
-
+            const song = trackToSong(track);
             dispatch({ type: 'SET_CURRENT_SONG', payload: song });
-
-            console.log('Playing:', song.uri);
             await playTrack(token, deviceId, song.uri);
-            setIsPlaying(true);
-        } catch (err: any) {
-            console.error('Playback Error:', err);
-            setError(`Error: ${err.message || 'Unknown playback error'}`);
+            setIsPlayingManual(true);
+        } catch (err) {
+            if (err instanceof SpotifyAuthError) {
+                await handleAuthError();
+            } else {
+                console.error('Playback Error:', err);
+                setError(`Error: ${err instanceof Error ? err.message : 'Unknown playback error'}`);
+            }
         } finally {
             setIsLoading(false);
         }
@@ -228,20 +236,22 @@ export const GameScreen: React.FC = () => {
         return (
             <div className="flex h-screen items-center justify-center flex-col gap-4 text-red-500 bg-neutral-900">
                 <h2 className="text-3xl font-bold">Error</h2>
-                <p className="text-xl">{error}</p>
+                <p className="text-xl">{isAuthError ? 'Your Spotify session expired.' : error}</p>
                 <div className="flex gap-4 mt-6">
-                    <button
-                        onClick={() => window.location.reload()}
-                        className="bg-neutral-700 text-white px-6 py-3 rounded-full hover:bg-neutral-600 transition font-bold"
-                    >
-                        Refresh Page
-                    </button>
                     <button
                         onClick={() => { logout(); login(); }}
                         className="bg-green-500 text-black px-6 py-3 rounded-full hover:bg-green-600 transition font-bold"
                     >
                         Re-Login
                     </button>
+                    {!isAuthError && (
+                        <button
+                            onClick={() => window.location.reload()}
+                            className="bg-neutral-700 text-white px-6 py-3 rounded-full hover:bg-neutral-600 transition font-bold"
+                        >
+                            Refresh Page
+                        </button>
+                    )}
                     <button
                         onClick={() => {
                             localStorage.clear();
@@ -329,14 +339,8 @@ export const GameScreen: React.FC = () => {
                         title="End Game"
                     >
                         <RefreshCw size={20} className="transform rotate-180" />
-                        {/* Using Refresh as End Game icon for now, or XCircle would be better if imported. Let's stick to text or reuse RefreshCw? 
-                           User asked for position improvement. 
-                           Let's use text but smaller, or an icon.
-                           Let's assume user wants 'End Game' text but better placed.
-                         */}
                         <span className="sr-only">End Game</span>
                     </button>
-                    {/* Wait, user might prefer text over cryptic icon. Let's revert to text button but distinct. */}
                 </div>
             </div>
 
@@ -435,7 +439,7 @@ export const GameScreen: React.FC = () => {
                                 <ul className="space-y-2 flex-grow overflow-y-auto max-h-[300px] pr-2 scrollbar-thin scrollbar-thumb-neutral-600">
                                     {[...state.players]
                                         .sort((a, b) => (a.rank || 999) - (b.rank || 999) || b.timeline.length - a.timeline.length)
-                                        .map((p, i) => (
+                                        .map((p) => (
                                             <li key={p.id} className={`flex justify-between items-center p-3 rounded-lg border transition-all ${p.rank === 1 ? 'bg-yellow-500/20 border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.2)]' : 'bg-neutral-900/50 border-white/5 hover:bg-neutral-700 hover:border-white/20'}`}>
                                                 <div className="flex items-center gap-3">
                                                     <div className="flex flex-col items-center w-6 justify-center">
@@ -471,7 +475,7 @@ export const GameScreen: React.FC = () => {
                 }
 
                 {
-                    state.currentPhase === 'PRE_TURN' && !revealData && (
+                    state.currentPhase === 'PRE_TURN' && (
                         <div className="flex flex-col items-center gap-4">
                             {error && (
                                 <div className="bg-red-900/50 text-red-200 px-4 py-2 rounded text-sm text-center max-w-md border border-red-500/50">
@@ -527,14 +531,14 @@ export const GameScreen: React.FC = () => {
                                 <div className="flex flex-col items-center">
                                     <button
                                         onClick={() => dispatch({ type: 'SKIP_SONG' })}
-                                        disabled={activePlayer.tokens < 1}
-                                        className={`flex flex-col items-center gap-3 group transition-all ${activePlayer.tokens >= 1 ? 'opacity-100 hover:text-yellow-400' : 'opacity-40 cursor-not-allowed'}`}
-                                        title="Discard current card (Costs 1 Token)"
+                                        disabled={activePlayer.tokens < 3}
+                                        className={`flex flex-col items-center gap-3 group transition-all ${activePlayer.tokens >= 3 ? 'opacity-100 hover:text-yellow-400' : 'opacity-40 cursor-not-allowed'}`}
+                                        title="Discard current card (Costs 3 Tokens)"
                                     >
-                                        <div className={`p-6 rounded-full border-2 transition-all transform group-hover:scale-110 shadow-xl ${activePlayer.tokens >= 1 ? 'bg-yellow-500/10 border-yellow-500 group-hover:bg-yellow-500/20 group-hover:shadow-[0_0_20px_rgba(234,179,8,0.4)]' : 'bg-neutral-800 border-neutral-700'}`}>
-                                            <RefreshCw size={32} className={activePlayer.tokens >= 1 ? "text-yellow-500" : "text-neutral-500"} />
+                                        <div className={`p-6 rounded-full border-2 transition-all transform group-hover:scale-110 shadow-xl ${activePlayer.tokens >= 3 ? 'bg-yellow-500/10 border-yellow-500 group-hover:bg-yellow-500/20 group-hover:shadow-[0_0_20px_rgba(234,179,8,0.4)]' : 'bg-neutral-800 border-neutral-700'}`}>
+                                            <RefreshCw size={32} className={activePlayer.tokens >= 3 ? "text-yellow-500" : "text-neutral-500"} />
                                         </div>
-                                        <span className="text-sm font-bold uppercase tracking-widest text-neutral-400 group-hover:text-white">Discard (-1)</span>
+                                        <span className="text-sm font-bold uppercase tracking-widest text-neutral-400 group-hover:text-white">Discard (-3)</span>
                                     </button>
                                 </div>
 
@@ -550,7 +554,8 @@ export const GameScreen: React.FC = () => {
                                                     await seekTrack(token, deviceId, newPos);
                                                     setProgressMs(newPos);
                                                 } catch (e) {
-                                                    console.error("Seek failed", e);
+                                                    if (e instanceof SpotifyAuthError) handleAuthError();
+                                                    else console.error("Seek failed", e);
                                                 }
                                             }}
                                             className="p-6 rounded-full bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-all border-2 border-neutral-700 hover:border-neutral-500 hover:scale-110 shadow-xl"
@@ -586,21 +591,27 @@ export const GameScreen: React.FC = () => {
                                                 <button
                                                     onClick={async () => {
                                                         if (!token || !deviceId || !state.currentSong) return;
-                                                        if (isPlaying) {
-                                                            await pauseTrack(token, deviceId);
-                                                            setIsPlaying(false);
-                                                        } else {
-                                                            // Try Resume first
-                                                            try {
-                                                                await resumeTrack(token, deviceId);
-                                                                setIsPlaying(true);
-                                                            } catch (err) {
-                                                                console.warn("Resume failed, restarting track at position", err);
-                                                                // Fallback: Restart logic BUT with position
-                                                                const fallbackPos = progressMs || 0;
-                                                                await playTrack(token, deviceId, state.currentSong.uri, fallbackPos);
-                                                                setIsPlaying(true);
+                                                        try {
+                                                            if (isPlaying) {
+                                                                await pauseTrack(token, deviceId);
+                                                                setIsPlayingManual(false);
+                                                            } else {
+                                                                // Try Resume first
+                                                                try {
+                                                                    await resumeTrack(token, deviceId);
+                                                                    setIsPlayingManual(true);
+                                                                } catch (err) {
+                                                                    if (err instanceof SpotifyAuthError) throw err;
+                                                                    console.warn("Resume failed, restarting track at position", err);
+                                                                    // Fallback: Restart logic BUT with position
+                                                                    const fallbackPos = progressMs || 0;
+                                                                    await playTrack(token, deviceId, state.currentSong.uri, fallbackPos);
+                                                                    setIsPlayingManual(true);
+                                                                }
                                                             }
+                                                        } catch (err) {
+                                                            if (err instanceof SpotifyAuthError) handleAuthError();
+                                                            else console.error('Playback toggle failed', err);
                                                         }
                                                     }}
                                                     className="w-full h-full flex items-center justify-center hover:bg-white/10 transition-colors"
@@ -619,7 +630,8 @@ export const GameScreen: React.FC = () => {
                                                     await seekTrack(token, deviceId, newPos);
                                                     setProgressMs(newPos);
                                                 } catch (e) {
-                                                    console.error("Seek failed", e);
+                                                    if (e instanceof SpotifyAuthError) handleAuthError();
+                                                    else console.error("Seek failed", e);
                                                 }
                                             }}
                                             className="p-6 rounded-full bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-all border-2 border-neutral-700 hover:border-neutral-500 hover:scale-110 shadow-xl"
@@ -633,8 +645,13 @@ export const GameScreen: React.FC = () => {
                                     <button
                                         onClick={async () => {
                                             if (!token || !deviceId || !state.currentSong) return;
-                                            await playTrack(token, deviceId, state.currentSong.uri);
-                                            setIsPlaying(true);
+                                            try {
+                                                await playTrack(token, deviceId, state.currentSong.uri);
+                                                setIsPlayingManual(true);
+                                            } catch (err) {
+                                                if (err instanceof SpotifyAuthError) handleAuthError();
+                                                else console.error('Restart failed', err);
+                                            }
                                         }}
                                         className="text-xs text-neutral-500 flex items-center gap-1 hover:text-white transition-colors uppercase font-bold tracking-wide"
                                     >
@@ -646,14 +663,14 @@ export const GameScreen: React.FC = () => {
                                 <div className="flex flex-col items-center">
                                     <button
                                         onClick={() => dispatch({ type: 'AUTO_PLACE_SONG' })}
-                                        disabled={activePlayer.tokens < 3}
-                                        className={`flex flex-col items-center gap-3 group transition-all ${activePlayer.tokens >= 3 ? 'opacity-100 hover:text-blue-400' : 'opacity-40 cursor-not-allowed'}`}
-                                        title="Auto-place card correctly (Costs 3 Tokens)"
+                                        disabled={activePlayer.tokens < 5}
+                                        className={`flex flex-col items-center gap-3 group transition-all ${activePlayer.tokens >= 5 ? 'opacity-100 hover:text-blue-400' : 'opacity-40 cursor-not-allowed'}`}
+                                        title="Auto-place card correctly (Costs 5 Tokens)"
                                     >
-                                        <div className={`p-6 rounded-full border-2 transition-all transform group-hover:scale-110 shadow-xl ${activePlayer.tokens >= 3 ? 'bg-blue-500/10 border-blue-500 group-hover:bg-blue-500/20 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.4)]' : 'bg-neutral-800 border-neutral-700'}`}>
-                                            <Play size={32} className={activePlayer.tokens >= 3 ? "text-blue-500" : "text-neutral-500"} />
+                                        <div className={`p-6 rounded-full border-2 transition-all transform group-hover:scale-110 shadow-xl ${activePlayer.tokens >= 5 ? 'bg-blue-500/10 border-blue-500 group-hover:bg-blue-500/20 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.4)]' : 'bg-neutral-800 border-neutral-700'}`}>
+                                            <Play size={32} className={activePlayer.tokens >= 5 ? "text-blue-500" : "text-neutral-500"} />
                                         </div>
-                                        <span className="text-sm font-bold uppercase tracking-widest text-neutral-400 group-hover:text-white">Auto Play (-3)</span>
+                                        <span className="text-sm font-bold uppercase tracking-widest text-neutral-400 group-hover:text-white">Auto Play (-5)</span>
                                     </button>
                                 </div>
                             </div>

@@ -1,4 +1,4 @@
-import { type GameState, type Song, type Player, type Difficulty } from '../types';
+import { type GameState, type Song, type Difficulty } from '../types';
 
 export type GameAction =
     | { type: 'SET_TOKEN'; payload: string }
@@ -13,7 +13,6 @@ export type GameAction =
     | { type: 'DISTRIBUTE_INITIAL_CARDS'; payload: { playerId: string; song: Song }[] }
     | { type: 'RESET_CURRENT_SONG' }
     | { type: 'AUTO_PLACE_SONG' }
-    | { type: 'CHALLENGE_PLACEMENT'; payload: { challengerId: string; index: number } } // Legacy/Internal use
     | { type: 'START_CHALLENGE_PHASE' }
     | { type: 'TOGGLE_CHALLENGER'; payload: { playerId: string } }
     | { type: 'START_CHALLENGE_ROUND' }
@@ -33,6 +32,7 @@ export const initialState: GameState = {
     challengerIds: [],
     challengeQueue: [],
     currentChallengerIndex: 0,
+    playedSongIds: [],
     settings: {
         cooperative: false,
         targetScore: 10,
@@ -41,13 +41,26 @@ export const initialState: GameState = {
 
 const COLORS = ['#10B981', '#F59E0B', '#3B82F6', '#EF4444', '#8B5CF6', '#EC4899'];
 
+// Finds the next player who hasn't already won, wrapping around the player list.
+// Used whenever a turn ends (normal reveal, auto-place, or "continue playing" after a win).
+function getNextActivePlayerIndex(players: GameState['players'], currentIndex: number): number {
+    let nextIndex = (currentIndex + 1) % players.length;
+    let loopCount = 0;
+    while (players[nextIndex].hasWon && loopCount < players.length) {
+        nextIndex = (nextIndex + 1) % players.length;
+        loopCount++;
+    }
+    return nextIndex;
+}
+
 export function gameReducer(state: GameState, action: GameAction): GameState {
     switch (action.type) {
         case 'SET_TOKEN':
             return state;
 
         case 'RESTORE_STATE':
-            return action.payload;
+            // Older saved states predate playedSongIds; default it so dedup logic never sees undefined.
+            return { ...action.payload, playedSongIds: action.payload.playedSongIds || [] };
 
         case 'ADD_PLAYER':
             return {
@@ -100,18 +113,9 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
             };
 
         case 'NEXT_TURN': {
-            let nextIndex = (state.activePlayerIndex + 1) % state.players.length;
-            let loopCount = 0;
-            // Skip over players who have already won
-            while (state.players[nextIndex].hasWon && loopCount < state.players.length) {
-                nextIndex = (nextIndex + 1) % state.players.length;
-                loopCount++;
-            }
-            // Logic for "End Game" if no players left could go here, but UI handles "Game Over"
-
             return {
                 ...state,
-                activePlayerIndex: nextIndex,
+                activePlayerIndex: getNextActivePlayerIndex(state.players, state.activePlayerIndex),
                 currentPhase: 'PRE_TURN',
                 currentSong: null,
                 challengerIds: [],
@@ -123,7 +127,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
             return {
                 ...state,
                 currentSong: action.payload,
-                currentPhase: 'LISTENING'
+                currentPhase: 'LISTENING',
+                playedSongIds: [...state.playedSongIds, action.payload.id]
             };
 
         case 'RESET_CURRENT_SONG':
@@ -134,19 +139,15 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
             };
 
         case 'GUESS_PLACEMENT':
+            // After the active player guesses, move straight into challenge selection
+            // so other players can opt in before the reveal.
             return {
                 ...state,
                 pendingPlacement: action.payload.index,
-                challengerIds: [], // Reset challenges for new guess
-                challengeQueue: [], // Reset selection queue
+                challengerIds: [],
+                challengeQueue: [],
                 currentChallengerIndex: 0,
-                // Instead of direct CHALLENGE, we wait for user to click "Challenge" button
                 currentPhase: 'CHALLENGE_SELECTION'
-                // Wait... old flow likely went to PRE_TURN -> LISTENING -> [User Guesses] -> CHALLENGE?
-                // Actually usually active player guesses, then we enter a phase where challenges CAN happen.
-                // The previous code had 'CHALLENGE' phase. Now we use 'CHALLENGE_SELECTION' as the "Base" state after a guess?
-                // Or maybe 'GUESS_PLACEMENT' sets 'pendingPlacement' and we stay in a "Review" state?
-                // Let's assume after guess, we go to 'CHALLENGE_SELECTION' immediately so people can opt in.
             };
 
         case 'START_CHALLENGE_PHASE':
@@ -216,41 +217,6 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
                 ...state,
                 currentChallengerIndex: nextIndex,
                 currentPhase: 'CHALLENGE_PLACEMENT'
-            };
-        }
-
-        case 'CHALLENGE_PLACEMENT': {
-            const { challengerId, index } = action.payload;
-
-            // If active player picked this index, invalid challenge (implied, but UI should prevent)
-            if (index === state.pendingPlacement) return state;
-
-            // Find existing challenge for this player
-            const existingChallengeIndex = state.challengerIds.findIndex(c => c.playerId === challengerId);
-
-            let newChallenges = [...state.challengerIds];
-
-            if (existingChallengeIndex !== -1) {
-                // If clicking the same spot, remove the challenge (toggle off)
-                if (newChallenges[existingChallengeIndex].index === index) {
-                    newChallenges.splice(existingChallengeIndex, 1);
-                } else {
-                    // Changing bet to a new slot
-                    // Check if another challenger already has this slot (if we want to enforce unique slots per person, or unique slots globally?)
-                    // Let's allow multiple people on same slot for now, as per standard betting rules unless specified otherwise.
-                    // Actually, earlier prompt said "if one player thinks it is wrong... places his guess... if a third player... places another option".
-                    // Implies unique slots per player, but multiple players can bet on different slots.
-                    // Let's update the index.
-                    newChallenges[existingChallengeIndex].index = index;
-                }
-            } else {
-                // Add new challenge
-                newChallenges.push({ playerId: challengerId, index });
-            }
-
-            return {
-                ...state,
-                challengerIds: newChallenges
             };
         }
 
@@ -369,47 +335,57 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         case 'AUTO_PLACE_SONG': {
             const playerIdx = state.activePlayerIndex;
             const activePlayer = state.players[playerIdx];
-            if (activePlayer.tokens < 3 || !state.currentSong) return state;
+            if (activePlayer.tokens < 5 || !state.currentSong) return state;
 
-            // correct placement automatically
+            // Correct placement automatically (paid for with tokens)
             const newTimeline = [...activePlayer.timeline, state.currentSong].sort((a, b) => a.year - b.year);
             const updatedPlayers = state.players.map((p, i) =>
-                i === playerIdx ? { ...p, timeline: newTimeline, tokens: p.tokens - 3 } : p
+                i === playerIdx ? { ...p, timeline: newTimeline, tokens: p.tokens - 5 } : p
             );
 
-            // Win Condition Check
             const target = Number(state.settings.targetScore || 10);
             const isWinner = newTimeline.length >= target && !activePlayer.hasWon;
 
+            if (isWinner) {
+                return {
+                    ...state,
+                    players: updatedPlayers,
+                    winner: updatedPlayers[playerIdx],
+                    currentPhase: 'GAME_OVER',
+                    currentSong: null
+                };
+            }
+
+            // Auto-placing still resolves the turn, so it passes to the next player
+            // just like a normal correct guess would.
             return {
                 ...state,
                 players: updatedPlayers,
-                winner: isWinner ? updatedPlayers[playerIdx] : null,
-                currentPhase: isWinner ? 'GAME_OVER' : 'PRE_TURN', // Auto Advance
-                currentSong: null
+                activePlayerIndex: getNextActivePlayerIndex(updatedPlayers, playerIdx),
+                winner: null,
+                currentPhase: 'PRE_TURN',
+                currentSong: null,
+                challengerIds: [],
+                lastResult: undefined
             };
         }
 
         case 'SKIP_SONG': {
             const playerIdx = state.activePlayerIndex;
             const activePlayer = state.players[playerIdx];
-            if (activePlayer.tokens < 1) return state;
+            if (activePlayer.tokens < 3) return state;
 
             const updatedPlayers = state.players.map((p, i) =>
-                i === playerIdx ? { ...p, tokens: p.tokens - 1 } : p
+                i === playerIdx ? { ...p, tokens: p.tokens - 3 } : p
             );
 
+            // Discard-and-redraw: the same player spends a token to skip a hard
+            // card and immediately draws again, rather than losing their turn.
             return {
                 ...state,
                 players: updatedPlayers,
                 currentSong: null,
-                currentPhase: 'PRE_TURN' // Effectively skips turn or resets for new draw? 
-                // HITStory rules: You discard the card and draw a new one. 
-                // But simplified: You spend a token to skip this hard card.
-                // Let's treat it as: You lose the card, but you don't lose the turn? 
-                // Actually if I set to PRE_TURN, they can draw again.
-                // If I set NEXT_TURN, they lose the turn. 
-                // Let's assume "Discard & Draw New" = PRE_TURN.
+                currentPhase: 'PRE_TURN'
             };
         }
 
@@ -422,19 +398,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
                 p.id === state.winner?.id ? { ...p, hasWon: true, rank: winnersCount + 1 } : p
             );
 
-            // Find next active player
-            let nextIndex = (state.activePlayerIndex + 1) % state.players.length;
-            let loopCount = 0;
-            while (updatedPlayers[nextIndex].hasWon && loopCount < state.players.length) {
-                nextIndex = (nextIndex + 1) % state.players.length;
-                loopCount++;
-            }
-
-            // If everyone has won (or 1 left), handle that? UI should block it, but just in case:
-            if (loopCount >= state.players.length - 1) {
-                // Only 1 player left or all won is handled by check in UI usually, 
-                // but let's just proceed to PRE_TURN for the last standing person or end.
-            }
+            const nextIndex = getNextActivePlayerIndex(updatedPlayers, state.activePlayerIndex);
 
             return {
                 ...state,

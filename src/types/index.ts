@@ -37,6 +37,7 @@ export interface GameState {
     currentSong: Song | null;
     winner: Player | null;
     pendingPlacement: number | null;
+    playedSongIds: string[];
 
     // Advanced Challenge State
     challengerIds: { playerId: string; index: number }[]; // Valid bets placed

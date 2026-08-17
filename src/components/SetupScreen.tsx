@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useGame } from '../context/GameContext';
+import { useGame } from '../context/useGame';
 import { fetchPlaylist } from '../lib/spotify';
 import { type Difficulty } from '../types';
 import { Plus, Play } from 'lucide-react';
@@ -59,6 +59,16 @@ export const SetupScreen: React.FC = () => {
             const data = await fetchPlaylist(token, playlistId);
             if (data && data.name) {
                 finalName = data.name;
+            }
+            // Rough floor: one starting card per player, plus enough distinct songs for
+            // every player to reach the target score without re-drawing the same track.
+            const minTracksNeeded = state.players.length * (targetScore + 1);
+            const total = data?.tracks?.total;
+            if (typeof total === 'number' && total < minTracksNeeded) {
+                const proceed = window.confirm(
+                    `This playlist only has ${total} tracks, but this game could need up to ${minTracksNeeded} unique songs (${state.players.length} players × ${targetScore + 1}). You may run out of new songs before someone wins.\n\nStart anyway?`
+                );
+                if (!proceed) return;
             }
         } catch (e) {
             console.error("Failed to fetch playlist name", e);
