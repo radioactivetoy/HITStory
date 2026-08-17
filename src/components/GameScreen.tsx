@@ -7,14 +7,15 @@ import { Play, RefreshCw, Pause, RotateCcw, FastForward, Rewind, ListMusic, Coin
 import { ResultModal } from './ResultModal';
 import GameLogo from '../assets/HITStory_Logo.png';
 
-const trackToSong = (track: SpotifyTrack): Song => ({
+const trackToSong = (track: SpotifyTrack, isEstimated: boolean): Song => ({
     id: track.id,
     title: track.name,
     artist: track.artists[0].name,
     album: track.album.name,
     year: parseInt(track.album.release_date.split('-')[0]),
     image: track.album.images[0].url,
-    uri: track.uri
+    uri: track.uri,
+    yearIsEstimated: isEstimated
 });
 
 export const GameScreen: React.FC = () => {
@@ -129,11 +130,11 @@ export const GameScreen: React.FC = () => {
 
             try {
                 for (const player of playersNeedingCards) {
-                    let track: SpotifyTrack | null = null;
+                    let drawn: { track: SpotifyTrack; isEstimated: boolean } | null = null;
                     let attempts = 0;
-                    while (!track && attempts < 5) {
+                    while (!drawn && attempts < 5) {
                         try {
-                            track = await fetchRandomTrack(token, pid, playlistTotal, excludeIds);
+                            drawn = await fetchRandomTrack(token, pid, playlistTotal, excludeIds);
                         } catch (e) {
                             if (e instanceof SpotifyAuthError) {
                                 handleAuthError();
@@ -143,9 +144,9 @@ export const GameScreen: React.FC = () => {
                         }
                         attempts++;
                     }
-                    if (!track) continue;
-                    excludeIds.add(track.id);
-                    validUpdates.push({ playerId: player.id, song: trackToSong(track) });
+                    if (!drawn) continue;
+                    excludeIds.add(drawn.track.id);
+                    validUpdates.push({ playerId: player.id, song: trackToSong(drawn.track, drawn.isEstimated) });
                 }
 
                 if (validUpdates.length > 0) {
@@ -182,26 +183,27 @@ export const GameScreen: React.FC = () => {
         const excludeIds = getExcludedSongIds();
 
         try {
-            let track: SpotifyTrack | null = null;
+            let drawn: { track: SpotifyTrack; isEstimated: boolean } | null = null;
             let attempts = 0;
             const MAX_ATTEMPTS = 5;
 
-            while (!track && attempts < MAX_ATTEMPTS) {
+            while (!drawn && attempts < MAX_ATTEMPTS) {
                 try {
-                    track = await fetchRandomTrack(token, pid, playlistTotal, excludeIds);
+                    drawn = await fetchRandomTrack(token, pid, playlistTotal, excludeIds);
                 } catch (err) {
+                    if (err instanceof SpotifyAuthError) throw err;
                     console.warn('Track fetch failed, retrying...', err);
                 }
                 attempts++;
             }
 
-            if (!track) {
+            if (!drawn) {
                 setError("Failed to fetch a track after multiple attempts. Playlist might be empty, fully played, or network down.");
                 setIsLoading(false);
                 return;
             }
 
-            const song = trackToSong(track);
+            const song = trackToSong(drawn.track, drawn.isEstimated);
             dispatch({ type: 'SET_CURRENT_SONG', payload: song });
             await playTrack(token, deviceId, song.uri);
             setIsPlayingManual(true);
@@ -528,7 +530,7 @@ export const GameScreen: React.FC = () => {
                         <div className="flex flex-col items-center gap-6 w-full max-w-4xl">
                             <div className="flex items-center justify-center gap-12 w-full">
                                 {/* Left Side: Discard Button */}
-                                <div className="flex flex-col items-center">
+                                <div className="flex flex-col items-center gap-2">
                                     <button
                                         onClick={() => dispatch({ type: 'SKIP_SONG' })}
                                         disabled={activePlayer.tokens < 3}
@@ -539,6 +541,13 @@ export const GameScreen: React.FC = () => {
                                             <RefreshCw size={32} className={activePlayer.tokens >= 3 ? "text-yellow-500" : "text-neutral-500"} />
                                         </div>
                                         <span className="text-sm font-bold uppercase tracking-widest text-neutral-400 group-hover:text-white">Discard (-3)</span>
+                                    </button>
+                                    <button
+                                        onClick={() => dispatch({ type: 'DISPUTE_SONG' })}
+                                        title="Year looks wrong (bad Spotify data)? Skip it for free, no token cost."
+                                        className="text-[10px] text-neutral-600 hover:text-neutral-300 transition-colors uppercase font-bold tracking-wide underline decoration-dotted underline-offset-2"
+                                    >
+                                        Bad data? Skip free
                                     </button>
                                 </div>
 

@@ -143,7 +143,7 @@ export interface SpotifyTrack {
     uri: string;
     name: string;
     duration_ms: number;
-    artists: { name: string }[];
+    artists: { id: string; name: string }[];
     album: {
         name: string;
         release_date: string;
@@ -175,19 +175,30 @@ export const fetchRandomTrack = async (
     playlistId: string,
     totalTracks: number,
     excludeIds?: Set<string>
-): Promise<SpotifyTrack | null> => {
+): Promise<{ track: SpotifyTrack; isEstimated: boolean } | null> => {
     const offset = Math.floor(Math.random() * totalTracks);
     const result = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=1&offset=${offset}`, {
         method: "GET", headers: { Authorization: `Bearer ${token}` }
     });
+    if (result.status === 401) throw new SpotifyAuthError();
     const data = await result.json();
 
     const originalTrack: SpotifyTrack | undefined = data.items?.[0]?.track;
     if (!originalTrack || excludeIds?.has(originalTrack.id)) return null;
 
-    // Playlists often contain remasters/radio edits with a misleading release date;
-    // search for an earlier release of the same recording and prefer its metadata
-    // (correct year + period-accurate artwork) when one is found.
+    // Playlists often contain remasters/reissues/remixes with a misleading release
+    // date. Prefer the oldest original release actually found in the track's own
+    // artist's discography (most reliable); fall back to a broader catalog search
+    // if that comes up empty.
+    const artistId = originalTrack.artists[0]?.id;
+    if (artistId) {
+        const fromDiscography = await findOriginalRelease(token, artistId, originalTrack.name, originalTrack.duration_ms);
+        if (fromDiscography && !excludeIds?.has(fromDiscography.id)) {
+            console.log(`Discography match: '${originalTrack.name}' (${originalTrack.album.release_date}) -> '${fromDiscography.name}' on '${fromDiscography.album.name}' (${fromDiscography.album.release_date})`);
+            return { track: fromDiscography, isEstimated: true };
+        }
+    }
+
     const olderTrack = await searchForEarliestTrack(
         token,
         originalTrack.artists[0].name,
@@ -197,10 +208,10 @@ export const fetchRandomTrack = async (
 
     if (olderTrack && !excludeIds?.has(olderTrack.id)) {
         console.log(`Deep Search: Swapped '${originalTrack.name}' (${originalTrack.album.release_date}) for '${olderTrack.name}' (${olderTrack.album.release_date})`);
-        return olderTrack;
+        return { track: olderTrack, isEstimated: true };
     }
 
-    return originalTrack;
+    return { track: originalTrack, isEstimated: false };
 };
 
 export const playTrack = async (token: string, deviceId: string, trackUri: string, positionMs?: number) => {
@@ -269,23 +280,142 @@ export const seekTrack = async (token: string, deviceId: string, positionMs: num
     }
 };
 
-// --- Deep Search Helper for Accurate Years ---
+// --- Accurate-Year Matching ---
+//
+// Playlists frequently contain remasters/reissues/remixes whose Spotify release_date
+// reflects the reissue, not the original recording. Two strategies try to recover the
+// true original year, tried in order of reliability:
+//   1. findOriginalRelease: scan the track's own artist's discography for the oldest
+//      original album/single that actually contains a matching track.
+//   2. searchForEarliestTrack: a broader catalog-wide text search, used only as a
+//      fallback since it can match unrelated recordings (covers, samples, etc).
+
+// Spotify's catalog has known placeholder/bogus dates (e.g. year 1900); reject those
+// rather than let them win as "the earliest".
+const isPlausibleReleaseDate = (dateStr: string | undefined | null): boolean => {
+    if (!dateStr) return false;
+    const year = parseInt(dateStr.slice(0, 4), 10);
+    return Number.isFinite(year) && year >= 1900 && year <= new Date().getFullYear() + 1;
+};
+
+const REISSUE_KEYWORDS = '(?:re-?master(?:ed)?|remix(?:ed)?|live|mono|stereo|demo|acoustic|edit|version|deluxe|anniversary|bonus track|single|extended|instrumental|radio|session)';
+const reissueParenPattern = new RegExp(`\\s*[([][^()[\\]]*${REISSUE_KEYWORDS}[^()[\\]]*[)\\]]`, 'gi');
+const reissueSuffixPattern = new RegExp(`\\s*[-–—]\\s*(?:\\d{4}\\s*)?${REISSUE_KEYWORDS}.*$`, 'i');
 
 const cleanTrackName = (name: string): string => {
     return name
-        .replace(/ - Remastered \d{4}/g, '')
-        .replace(/ - Remastered/g, '')
-        .replace(/ \(Remastered \d{4}\)/g, '')
-        .replace(/ \(Remastered\)/g, '')
-        .replace(/ - \d{4} Remaster/g, '')
-        .replace(/ - Live/g, '')
-        .replace(/ \(Live\)/g, '')
-        .replace(/ - Radio Edit/g, '')
-        .replace(/ - Edit/g, '')
-        .replace(/ - Mono/g, '')
-        .replace(/ - Stereo/g, '')
-        .split(' - ')[0] // Aggressive: take the main title if there's a dash separator we missed
+        // Parenthetical/bracketed qualifiers containing a reissue keyword, e.g. "(2011 Remaster)", "(Deluxe Edition)"
+        .replace(reissueParenPattern, '')
+        // Trailing " - <keyword...>" dash suffixes, e.g. "- Remastered 2009", "- Live at Wembley"
+        .replace(reissueSuffixPattern, '')
+        // Featured-artist annotations, irrelevant for title matching
+        .replace(/\s*[([]feat\.?[^)\]]*[)\]]/gi, '')
+        .replace(/\s+feat\.?\s+.*$/i, '')
         .trim();
+};
+
+interface SimplifiedAlbum {
+    id: string;
+    name: string;
+    release_date: string;
+}
+
+interface SimplifiedTrack {
+    id: string;
+    uri: string;
+    name: string;
+    duration_ms: number;
+    artists: { id: string; name: string }[];
+}
+
+interface FullAlbum {
+    id: string;
+    name: string;
+    release_date: string;
+    images: { url: string }[];
+    tracks?: { items: SimplifiedTrack[] };
+}
+
+// Scans the artist's own albums/singles (oldest first) for the first one that
+// actually contains this track, and returns it with that album's metadata. This is
+// far more reliable than a catalog-wide search since it's anchored to a real,
+// original release by the correct artist rather than search relevance + duration.
+const findOriginalRelease = async (
+    token: string,
+    artistId: string,
+    trackName: string,
+    originalDurationMs: number
+): Promise<SpotifyTrack | null> => {
+    const targetName = cleanTrackName(trackName).toLowerCase();
+
+    // 1. Gather albums/singles only — deliberately excluding compilations and
+    // "appears on" credits, which are exactly the reissue/various-artists entries
+    // with unreliable dates.
+    const albums: SimplifiedAlbum[] = [];
+    let url: string | null = `https://api.spotify.com/v1/artists/${artistId}/albums?include_groups=album,single&limit=50`;
+    let pages = 0;
+    while (url && pages < 2) {
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status === 401) throw new SpotifyAuthError();
+        const data = await res.json();
+        if (Array.isArray(data.items)) albums.push(...data.items);
+        url = data.next || null;
+        pages++;
+    }
+
+    // Dedupe cross-market duplicates, drop bogus dates, sort oldest first, cap scan size.
+    const seen = new Set<string>();
+    const candidates = albums
+        .filter(a => isPlausibleReleaseDate(a.release_date))
+        .filter(a => {
+            const key = `${a.name.toLowerCase()}|${a.release_date}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .sort((a, b) => new Date(a.release_date).getTime() - new Date(b.release_date).getTime())
+        .slice(0, 60);
+
+    // 2. Batch-fetch full album details (needed for tracklists + cover art), 20 at a
+    // time, stopping at the first chunk that yields a match.
+    for (let i = 0; i < candidates.length; i += 20) {
+        const chunk = candidates.slice(i, i + 20);
+        const res = await fetch(`https://api.spotify.com/v1/albums?ids=${chunk.map(a => a.id).join(',')}`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.status === 401) throw new SpotifyAuthError();
+        const data = await res.json();
+        const fullAlbums: FullAlbum[] = data.albums || [];
+
+        // Preserve the oldest-first order within this chunk.
+        for (const album of chunk) {
+            const full = fullAlbums.find(a => a && a.id === album.id);
+            if (!full?.tracks?.items) continue;
+
+            const match = full.tracks.items.find(t => {
+                const nameMatch = cleanTrackName(t.name).toLowerCase() === targetName;
+                const durationMatch = Math.abs(t.duration_ms - originalDurationMs) < 45000;
+                return nameMatch && durationMatch;
+            });
+
+            if (match) {
+                return {
+                    id: match.id,
+                    uri: match.uri,
+                    name: match.name,
+                    duration_ms: match.duration_ms,
+                    artists: match.artists,
+                    album: {
+                        name: full.name,
+                        release_date: full.release_date,
+                        images: full.images
+                    }
+                };
+            }
+        }
+    }
+
+    return null;
 };
 
 const searchForEarliestTrack = async (token: string, artistName: string, trackName: string, originalDurationMs: number): Promise<SpotifyTrack | null> => {
@@ -295,16 +425,17 @@ const searchForEarliestTrack = async (token: string, artistName: string, trackNa
         const res = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=10`, {
             headers: { Authorization: `Bearer ${token}` }
         });
+        if (res.status === 401) throw new SpotifyAuthError();
 
         const data = await res.json();
         if (!data.tracks || !data.tracks.items) return null;
 
         const candidates: SpotifyTrack[] = data.tracks.items.filter((t: SpotifyTrack) => {
-            // Must loosely match the primary artist, and be close in duration
-            // (allow +/- 30s for radio edits vs album versions).
+            // Must loosely match the primary artist, be close in duration (allow +/-
+            // 30s for radio edits vs album versions), and have a plausible date.
             const artistMatch = t.artists.some((a) => a.name.toLowerCase().includes(artistName.toLowerCase()));
             const durationMatch = Math.abs(t.duration_ms - originalDurationMs) < 30000;
-            return artistMatch && durationMatch;
+            return artistMatch && durationMatch && isPlausibleReleaseDate(t.album.release_date);
         });
 
         if (candidates.length === 0) return null;
@@ -313,6 +444,7 @@ const searchForEarliestTrack = async (token: string, artistName: string, trackNa
 
         return candidates[0]; // Oldest match
     } catch (e) {
+        if (e instanceof SpotifyAuthError) throw e;
         console.warn("Deep Search Failed:", e);
         return null;
     }

@@ -19,6 +19,7 @@ export type GameAction =
     | { type: 'PLACE_CHALLENGE_BET'; payload: { index: number } }
     | { type: 'PASS_CHALLENGE' }
     | { type: 'SKIP_SONG' }
+    | { type: 'DISPUTE_SONG' }
     | { type: 'CONTINUE_GAME' }
     | { type: 'RESTORE_STATE'; payload: GameState };
 
@@ -384,6 +385,16 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
             return {
                 ...state,
                 players: updatedPlayers,
+                currentSong: null,
+                currentPhase: 'PRE_TURN'
+            };
+        }
+
+        case 'DISPUTE_SONG': {
+            // Data-quality escape hatch, not a strategic move: no token cost.
+            // For when the matched year is clearly wrong and shouldn't be played on.
+            return {
+                ...state,
                 currentSong: null,
                 currentPhase: 'PRE_TURN'
             };

@@ -81,7 +81,12 @@ export const Timeline: React.FC<TimelineProps> = ({ player, onGapClick, isIntera
                                         <div className="absolute inset-0 bg-linear-to-t from-black/90 to-transparent opacity-80"></div>
                                     </div>
                                     <div className="absolute bottom-0 inset-x-0 top-56 bg-neutral-900/90 backdrop-blur-md p-4 border-t border-white/5 flex flex-col items-center text-center gap-1">
-                                        <span className="text-4xl font-black text-white tracking-tighter drop-shadow-md leading-none mb-1">{item.data.year}</span>
+                                        <span className="flex items-center gap-1.5 mb-1">
+                                            <span className="text-4xl font-black text-white tracking-tighter drop-shadow-md leading-none">{item.data.year}</span>
+                                            {item.data.yearIsEstimated && (
+                                                <span title="Year matched automatically, not taken directly from this track" className="text-[9px] font-bold text-neutral-500 uppercase tracking-wider border border-neutral-600 rounded px-1 py-0.5 self-start mt-1">Est.</span>
+                                            )}
+                                        </span>
                                         <span className="text-xs font-bold text-green-400 line-clamp-2 leading-tight">{item.data.title}</span>
                                         <span className="text-xs text-neutral-400 line-clamp-1">{item.data.artist}</span>
                                     </div>

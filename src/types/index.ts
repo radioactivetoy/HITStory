@@ -8,6 +8,9 @@ export interface Song {
     year: number;
     image: string;
     uri: string;
+    // True when the year came from matching against the artist's discography or a
+    // catalog search rather than being taken directly from the playlist's own track.
+    yearIsEstimated?: boolean;
 }
 
 export interface Player {

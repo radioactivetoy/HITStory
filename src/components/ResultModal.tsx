@@ -39,7 +39,12 @@ export const ResultModal: React.FC<ResultModalProps> = ({ isOpen, song, result, 
                 <div className="z-10 bg-neutral-900 p-6 rounded-2xl border border-neutral-600 shadow-xl flex flex-col items-center transform transition-all hover:scale-105 w-full max-w-md">
                     <img src={song.image} alt={song.title} className="w-64 h-64 object-cover rounded-xl shadow-lg mb-6" />
                     <div className="text-center w-full px-2">
-                        <div className="text-4xl font-bold text-white mb-2">{result.actualYear}</div>
+                        <div className="flex items-center justify-center gap-2 mb-2">
+                            <div className="text-4xl font-bold text-white">{result.actualYear}</div>
+                            {song.yearIsEstimated && (
+                                <span title="This year was matched automatically rather than taken directly from this track" className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider border border-neutral-600 rounded px-1.5 py-0.5">Est.</span>
+                            )}
+                        </div>
                         <div className="text-xl text-green-400 font-bold mb-1 leading-tight break-words">{song.title}</div>
                         <div className="text-md text-neutral-400 font-medium break-words">{song.artist}</div>
                     </div>
