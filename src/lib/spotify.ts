@@ -298,9 +298,11 @@ const isPlausibleReleaseDate = (dateStr: string | undefined | null): boolean => 
     return Number.isFinite(year) && year >= 1900 && year <= new Date().getFullYear() + 1;
 };
 
-const REISSUE_KEYWORDS = '(?:re-?master(?:ed)?|remix(?:ed)?|live|mono|stereo|demo|acoustic|edit|version|deluxe|anniversary|bonus track|single|extended|instrumental|radio|session)';
-const reissueParenPattern = new RegExp(`\\s*[([][^()[\\]]*${REISSUE_KEYWORDS}[^()[\\]]*[)\\]]`, 'gi');
-const reissueSuffixPattern = new RegExp(`\\s*[-–—]\\s*(?:\\d{4}\\s*)?${REISSUE_KEYWORDS}.*$`, 'i');
+const REISSUE_KEYWORDS = '(?:re-?master(?:ed)?|re-?mix(?:ed)?|re-?work(?:ed)?|re-?edit(?:ed)?|mix|live|mono|stereo|demo|acoustic|edit|version|deluxe|anniversary|bonus\\s*track|single|extended|instrumental|radio|session|clean|explicit|karaoke|club|dub|vip|maxi|megamix)';
+// Word-boundaried so e.g. "live"/"mix"/"edit" don't match inside unrelated words
+// like "Alive", "Mixtape", or "Editorial".
+const reissueParenPattern = new RegExp(`\\s*[([][^()[\\]]*\\b${REISSUE_KEYWORDS}\\b[^()[\\]]*[)\\]]`, 'gi');
+const reissueSuffixPattern = new RegExp(`\\s*[-–—]\\s*(?:\\d{4}\\s*)?\\b${REISSUE_KEYWORDS}\\b.*$`, 'i');
 
 const cleanTrackName = (name: string): string => {
     return name
@@ -351,10 +353,16 @@ const findOriginalRelease = async (
     // 1. Gather albums/singles only — deliberately excluding compilations and
     // "appears on" credits, which are exactly the reissue/various-artists entries
     // with unreliable dates.
+    // Spotify doesn't guarantee chronological order here, so the full list must be
+    // gathered before sorting — capping this early can (and did) silently drop the
+    // true original release for prolific/decades-spanning artists, leaving only
+    // recent same-artist-credited repackages (reissue campaigns, "music from the
+    // documentary" compilations, etc.) in the candidate pool.
     const albums: SimplifiedAlbum[] = [];
     let url: string | null = `https://api.spotify.com/v1/artists/${artistId}/albums?include_groups=album,single&limit=50`;
     let pages = 0;
-    while (url && pages < 2) {
+    const MAX_PAGES = 10; // up to ~500 albums/singles — this summary fetch is cheap
+    while (url && pages < MAX_PAGES) {
         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         if (res.status === 401) throw new SpotifyAuthError();
         const data = await res.json();

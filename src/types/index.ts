@@ -52,6 +52,9 @@ export interface GameState {
         actualYear: number;
         stolenBy?: string;
         tokenChanges?: Record<string, number>;
+        // The active player's originally-guessed gap index, kept so a later year
+        // correction can re-validate (and award) a guess that was wrongly discarded.
+        guessedIndex: number;
     };
     settings: {
         cooperative: boolean;

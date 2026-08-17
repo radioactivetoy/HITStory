@@ -20,6 +20,7 @@ export type GameAction =
     | { type: 'PASS_CHALLENGE' }
     | { type: 'SKIP_SONG' }
     | { type: 'DISPUTE_SONG' }
+    | { type: 'CORRECT_SONG_YEAR'; payload: { songId: string; newYear: number } }
     | { type: 'CONTINUE_GAME' }
     | { type: 'RESTORE_STATE'; payload: GameState };
 
@@ -328,8 +329,90 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
                     correct: isActivePlayerCorrect,
                     actualYear: song.year,
                     stolenBy,
-                    tokenChanges
+                    tokenChanges,
+                    guessedIndex: placementIdx
                 }
+            };
+        }
+
+        case 'CORRECT_SONG_YEAR': {
+            const { songId, newYear } = action.payload;
+            if (!state.currentSong || state.currentSong.id !== songId) return state;
+
+            const correctedSong: Song = { ...state.currentSong, year: newYear, yearIsEstimated: true };
+            const target = Number(state.settings.targetScore || 10);
+
+            // Does this year fit between the timeline's existing neighbors at idx?
+            const checkFitsAt = (timeline: Song[], idx: number, year: number) => {
+                const prev = idx > 0 ? timeline[idx - 1] : null;
+                const next = idx < timeline.length ? timeline[idx] : null;
+                return (!prev || year >= prev.year) && (!next || year <= next.year);
+            };
+
+            // Pull the card out of wherever it currently sits (a timeline, or nowhere if
+            // discarded) so correctness can be re-derived cleanly against the corrected
+            // year, using the same priority CONFIRM_REVEAL used: the active player's own
+            // guess first, then challengers in the order they bet.
+            const playersWithoutCard = state.players.map(p => ({
+                ...p,
+                timeline: p.timeline.filter(s => s.id !== songId)
+            }));
+
+            const activePlayerIdx = state.activePlayerIndex;
+            const activeTimeline = playersWithoutCard[activePlayerIdx].timeline;
+            const guessedIndex = state.lastResult?.guessedIndex;
+
+            const activePlayerCorrect = guessedIndex !== undefined && checkFitsAt(activeTimeline, guessedIndex, newYear);
+            const winningChallenge = !activePlayerCorrect
+                ? state.challengerIds.find(c => checkFitsAt(activeTimeline, c.index, newYear))
+                : undefined;
+
+            let updatedPlayers = playersWithoutCard;
+            let updatedResult = state.lastResult;
+            let updatedWinner = state.winner;
+            let updatedPhase = state.currentPhase;
+
+            if (activePlayerCorrect && guessedIndex !== undefined) {
+                const newTimeline = [...activeTimeline];
+                newTimeline.splice(guessedIndex, 0, correctedSong);
+                updatedPlayers = playersWithoutCard.map((p, i) => i === activePlayerIdx ? { ...p, timeline: newTimeline } : p);
+
+                if (state.lastResult) {
+                    updatedResult = { ...state.lastResult, actualYear: newYear, correct: true, stolenBy: undefined };
+                }
+                const activePlayer = updatedPlayers[activePlayerIdx];
+                if (newTimeline.length >= target && !activePlayer.hasWon) {
+                    updatedWinner = activePlayer;
+                    updatedPhase = 'GAME_OVER';
+                }
+            } else if (winningChallenge) {
+                const winnerIdx = playersWithoutCard.findIndex(p => p.id === winningChallenge.playerId);
+                if (winnerIdx !== -1) {
+                    const newTimeline = [...playersWithoutCard[winnerIdx].timeline, correctedSong].sort((a, b) => a.year - b.year);
+                    updatedPlayers = playersWithoutCard.map((p, i) => i === winnerIdx ? { ...p, timeline: newTimeline } : p);
+
+                    if (state.lastResult) {
+                        const winnerName = state.players.find(p => p.id === winningChallenge.playerId)?.name;
+                        updatedResult = { ...state.lastResult, actualYear: newYear, correct: false, stolenBy: winnerName };
+                    }
+                    const winnerPlayer = updatedPlayers[winnerIdx];
+                    if (newTimeline.length >= target && !winnerPlayer.hasWon) {
+                        updatedWinner = winnerPlayer;
+                        updatedPhase = 'GAME_OVER';
+                    }
+                }
+            } else if (state.lastResult) {
+                // Still doesn't validate anyone's guess — just fix the displayed year.
+                updatedResult = { ...state.lastResult, actualYear: newYear };
+            }
+
+            return {
+                ...state,
+                players: updatedPlayers,
+                currentSong: correctedSong,
+                lastResult: updatedResult,
+                winner: updatedWinner,
+                currentPhase: updatedPhase
             };
         }
 

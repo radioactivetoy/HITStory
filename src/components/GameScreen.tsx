@@ -812,10 +812,16 @@ export const GameScreen: React.FC = () => {
 
 
                 <ResultModal
+                    key={state.currentSong?.id ?? 'none'}
                     isOpen={state.currentPhase === 'REVEAL'}
                     song={state.currentSong}
                     result={state.lastResult}
                     onNextTurn={() => dispatch({ type: 'NEXT_TURN' })}
+                    onCorrectYear={(newYear) => {
+                        if (state.currentSong) {
+                            dispatch({ type: 'CORRECT_SONG_YEAR', payload: { songId: state.currentSong.id, newYear } });
+                        }
+                    }}
                     players={state.players}
                 />
 

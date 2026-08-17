@@ -1,17 +1,34 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { Song, Player } from '../types';
-import { CheckCircle, XCircle, AlertTriangle, ArrowRight } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, ArrowRight, Pencil } from 'lucide-react';
 
 interface ResultModalProps {
     isOpen: boolean;
     song: Song | null;
     result: { correct: boolean; actualYear: number; stolenBy?: string; tokenChanges?: Record<string, number> } | undefined;
     onNextTurn: () => void;
+    onCorrectYear: (newYear: number) => void;
     players: Player[];
 }
 
-export const ResultModal: React.FC<ResultModalProps> = ({ isOpen, song, result, onNextTurn, players }) => {
+export const ResultModal: React.FC<ResultModalProps> = ({ isOpen, song, result, onNextTurn, onCorrectYear, players }) => {
+    const [isEditingYear, setIsEditingYear] = useState(false);
+    const [yearInput, setYearInput] = useState('');
+
     if (!isOpen || !song || !result) return null;
+
+    const startEditingYear = () => {
+        setYearInput(String(result.actualYear));
+        setIsEditingYear(true);
+    };
+
+    const submitYearCorrection = () => {
+        const parsed = parseInt(yearInput, 10);
+        if (Number.isFinite(parsed) && parsed > 1800 && parsed <= new Date().getFullYear() + 1) {
+            onCorrectYear(parsed);
+        }
+        setIsEditingYear(false);
+    };
 
     return (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 animate-fade-in backdrop-blur-sm">
@@ -39,12 +56,44 @@ export const ResultModal: React.FC<ResultModalProps> = ({ isOpen, song, result, 
                 <div className="z-10 bg-neutral-900 p-6 rounded-2xl border border-neutral-600 shadow-xl flex flex-col items-center transform transition-all hover:scale-105 w-full max-w-md">
                     <img src={song.image} alt={song.title} className="w-64 h-64 object-cover rounded-xl shadow-lg mb-6" />
                     <div className="text-center w-full px-2">
-                        <div className="flex items-center justify-center gap-2 mb-2">
-                            <div className="text-4xl font-bold text-white">{result.actualYear}</div>
-                            {song.yearIsEstimated && (
-                                <span title="This year was matched automatically rather than taken directly from this track" className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider border border-neutral-600 rounded px-1.5 py-0.5">Est.</span>
-                            )}
-                        </div>
+                        {isEditingYear ? (
+                            <div className="flex items-center justify-center gap-2 mb-2">
+                                <input
+                                    type="number"
+                                    autoFocus
+                                    value={yearInput}
+                                    onChange={(e) => setYearInput(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && submitYearCorrection()}
+                                    className="w-24 bg-neutral-800 text-white text-3xl font-bold text-center rounded-lg border border-neutral-600 focus:ring-2 focus:ring-green-500 outline-none py-1"
+                                />
+                                <button
+                                    onClick={submitYearCorrection}
+                                    className="bg-green-500 hover:bg-green-400 text-black text-sm font-bold px-3 py-2 rounded-lg"
+                                >
+                                    Save
+                                </button>
+                                <button
+                                    onClick={() => setIsEditingYear(false)}
+                                    className="text-neutral-400 hover:text-white text-sm font-bold px-2 py-2"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-center gap-2 mb-2 group">
+                                <div className="text-4xl font-bold text-white">{result.actualYear}</div>
+                                {song.yearIsEstimated && (
+                                    <span title="This year was matched automatically rather than taken directly from this track" className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider border border-neutral-600 rounded px-1.5 py-0.5">Est.</span>
+                                )}
+                                <button
+                                    onClick={startEditingYear}
+                                    title="Correct this year if it looks wrong (bad Spotify data)"
+                                    className="text-neutral-600 hover:text-white transition-colors p-1"
+                                >
+                                    <Pencil size={14} />
+                                </button>
+                            </div>
+                        )}
                         <div className="text-xl text-green-400 font-bold mb-1 leading-tight break-words">{song.title}</div>
                         <div className="text-md text-neutral-400 font-medium break-words">{song.artist}</div>
                     </div>
